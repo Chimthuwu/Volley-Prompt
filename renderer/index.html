@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>PromptVolley</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header>
+  <div class="brand"><img src="icon.svg" alt=""><h1>Prompt<span>Volley</span></h1></div>
+  <div class="hbtns"><button class="ghost" id="btnFolder">📁 Saved runs</button> <button class="ghost" id="btnSettings">⚙ Settings</button></div>
+</header>
+
+<main>
+  <section id="setup" class="card">
+    <h2>1 · What do you want to build?</h2>
+    <p class="hint">Just ramble. A rough idea is fine — the AIs will do the hard part.</p>
+    <textarea id="idea" placeholder="e.g. A 2D pixel-art platformer where you play a cat stealing fish from a ship…"></textarea>
+    <div class="row">
+      <label>✍ Writer AI <small>writes the prompt</small><input id="author" list="modelList" spellcheck="false"></label>
+      <label>🔍 Reviewer AI <small>picks it apart</small><input id="critic" list="modelList" spellcheck="false"></label>
+      <label>Max rounds <small>3 is plenty</small><input id="rounds" type="number" min="1" max="8" value="3"></label>
+    </div>
+    <datalist id="modelList"></datalist>
+    <label class="check"><input type="checkbox" id="auto"> Hands-off mode (don't pause for my notes between rounds)</label>
+    <button class="big" id="btnStart">🚀 Start the volley</button>
+  </section>
+
+  <section id="run" class="hidden">
+    <div class="status"><span id="statusText">Starting…</span><button class="ghost danger" id="btnStop">■ Stop</button></div>
+    <div class="panels">
+      <div class="panel author"><h3>✍ Writer <span id="aRound"></span></h3><pre id="aOut"></pre></div>
+      <div class="panel critic"><h3>🔍 Reviewer <span id="cRound"></span></h3><pre id="cOut"></pre></div>
+    </div>
+    <div id="notesBox" class="card hidden">
+      <h3>Your turn (optional)</h3>
+      <p class="hint">Add your own notes — they outrank the reviewer's. Or just hit Continue.</p>
+      <textarea id="notes" placeholder="e.g. Make it mobile-friendly. No multiplayer."></textarea>
+      <div class="row"><button class="big" id="btnContinue">Continue ▶</button><button class="ghost" id="btnFinish">Good enough — finish here</button></div>
+    </div>
+  </section>
+
+  <section id="result" class="card hidden">
+    <h2>🎉 Your finished prompt</h2>
+    <pre id="final"></pre>
+    <div class="row"><button class="big" id="btnCopy">📋 Copy prompt</button><button class="ghost" id="btnAgain">Start a new one</button></div>
+    <p class="hint" id="savedAt"></p>
+  </section>
+</main>
+
+<div id="modal" class="modal hidden"><div class="card">
+  <h2 id="modalTitle">Welcome! One-time setup</h2>
+  <ol class="steps">
+    <li>Make a free account at <a href="#" data-url="https://openrouter.ai">openrouter.ai</a></li>
+    <li>Add a few dollars of credit: <a href="#" data-url="https://openrouter.ai/credits">openrouter.ai/credits</a></li>
+    <li>Create a key at <a href="#" data-url="https://openrouter.ai/keys">openrouter.ai/keys</a> and paste it here:</li>
+  </ol>
+  <input id="keyInput" type="password" placeholder="sk-or-..." spellcheck="false">
+  <div id="keyMsg" class="msg"></div>
+  <div class="row"><button class="big" id="btnSaveKey">Save key</button><button class="ghost" id="btnCloseModal">Close</button></div>
+  <p class="hint">Your key is stored encrypted on this computer only.</p>
+</div></div>
+<div id="toast" class="toast hidden"></div>
+<script src="app.js"></script>
+</body></html>

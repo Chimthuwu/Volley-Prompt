@@ -1,0 +1,35 @@
+{
+  "name": "promptvolley",
+  "productName": "PromptVolley",
+  "version": "1.0.0",
+  "description": "Two AIs volley your prompt back and forth until it's perfect.",
+  "main": "main.js",
+  "author": "Serge",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "icons": "node scripts/make-icons.mjs",
+    "dist": "npm run icons && electron-builder --win --publish never",
+    "site:dev": "wrangler dev",
+    "site:deploy": "wrangler deploy"
+  },
+  "build": {
+    "appId": "com.serge.promptvolley",
+    "productName": "PromptVolley",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.js", "renderer/**", "build/icon.png"],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico",
+      "artifactName": "PromptVolley - Windows Setup v${version}.${ext}"
+    },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^2.1.8",
+    "sharp": "^0.33.5",
+    "wrangler": "^4.0.0"
+  }
+}
