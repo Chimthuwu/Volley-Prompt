@@ -4,7 +4,7 @@ const path = require('path');
 
 const API = 'https://openrouter.ai/api/v1';
 const keyFile = () => path.join(app.getPath('userData'), 'key.bin');
-const runsDir = () => path.join(app.getPath('documents'), 'PromptVolley');
+const runsDir = () => path.join(app.getPath('documents'), 'VolleyPrompt');
 
 const AUTHOR_SYSTEM = `You are an expert prompt engineer. The user wants a prompt they can give to an AI coding assistant to build a game or app. Write a clear, complete, well-structured prompt: goal, tech stack, core features, constraints, scope/milestones, and what 'done' looks like. Make reasonable assumptions explicit instead of leaving gaps. When given critic feedback, revise accordingly and keep what already works. Output ONLY the prompt itself, no preamble or commentary.`;
 
@@ -22,7 +22,7 @@ let win, current = null;
 function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 860, minWidth: 900, minHeight: 600,
-    backgroundColor: '#0b0820', title: 'PromptVolley',
+    backgroundColor: '#0b0820', title: 'VolleyPrompt',
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
@@ -80,7 +80,7 @@ ipcMain.handle('url:open', (_e, u) => { if (/^https:\/\//.test(u)) shell.openExt
 async function stream(key, model, system, messages, signal, onDelta) {
   const res = await fetch(`${API}/chat/completions`, {
     method: 'POST', signal,
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'PromptVolley' },
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'VolleyPrompt' },
     body: JSON.stringify({ model, stream: true, messages: [{ role: 'system', content: system }, ...messages] }),
   });
   if (!res.ok) throw new Error(friendly(res.status, await res.text().catch(() => '')));
@@ -122,7 +122,7 @@ ipcMain.handle('run:start', async (_e, cfg) => {
   const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
   fs.mkdirSync(runsDir(), { recursive: true });
   const logPath = path.join(runsDir(), `${stamp}.md`);
-  const log = [`# PromptVolley ${stamp}\n`, `Author: ${author}  \nCritic: ${critic}\n`, `## Idea\n\n${idea}\n`];
+  const log = [`# VolleyPrompt ${stamp}\n`, `Author: ${author}  \nCritic: ${critic}\n`, `## Idea\n\n${idea}\n`];
   const history = [{ role: 'user', content: `Write the prompt for this idea:\n\n${idea}` }];
   let draft = '';
   try {
