@@ -31,6 +31,8 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
 }
 
+if (!app.requestSingleInstanceLock()) app.quit();
+app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => app.quit());
 
@@ -78,11 +80,21 @@ ipcMain.handle('folder:open', () => { fs.mkdirSync(runsDir(), { recursive: true 
 ipcMain.handle('url:open', (_e, u) => { if (/^https:\/\//.test(u)) shell.openExternal(u); });
 
 async function stream(key, model, system, messages, signal, onDelta) {
-  const res = await fetch(`${API}/chat/completions`, {
+  const req = () => fetch(`${API}/chat/completions`, {
     method: 'POST', signal,
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'VolleyPrompt' },
     body: JSON.stringify({ model, stream: true, messages: [{ role: 'system', content: system }, ...messages] }),
   });
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    try { res = await req(); } catch (e) {
+      if (signal.aborted) throw e;
+      if (attempt < 2) { await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); continue; }
+      throw new Error("Can't reach OpenRouter. Check your internet.");
+    }
+    if ((res.status === 429 || res.status >= 500) && attempt < 2) { await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); continue; }
+    break;
+  }
   if (!res.ok) throw new Error(friendly(res.status, await res.text().catch(() => '')));
   const dec = new TextDecoder();
   let buf = '', text = '';

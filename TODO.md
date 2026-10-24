@@ -18,5 +18,8 @@ Electron app: a Writer AI and a Reviewer AI (via OpenRouter) volley a prompt bac
 ## Later
 - Markdown rendering in panels, custom rubric editor, run-history browser
 
+## Done (refine pass)
+- Editable final prompt, per-panel copy, round progress bar, Ctrl+Enter, re-run with tweaked idea, single-instance lock, auto-retry on 429/5xx/network blips
+
 ## Open questions
 - GitHub username/repo for the download link?

@@ -26,10 +26,13 @@ button{font:inherit;cursor:pointer;border:0;border-radius:12px;padding:10px 18px
 .panel.author{border-top:3px solid var(--g)}.panel.critic{border-top:3px solid var(--p)}
 .panel.author.live{box-shadow:0 0 26px -6px var(--g)}.panel.critic.live{box-shadow:0 0 26px -6px var(--p)}
 pre{white-space:pre-wrap;word-wrap:break-word;font:13.5px/1.55 Consolas,monospace;margin:0;max-height:52vh;overflow:auto}
-#final{max-height:60vh;background:#0d0a28;border-radius:10px;padding:14px;border:1px solid var(--line)}
+
 .modal{position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;z-index:9}
 .modal .card{width:min(560px,92vw)}
 .steps{color:var(--dim);padding-left:20px}a{color:var(--b)}
 .msg{min-height:22px;margin-top:6px;font-weight:600}.msg.ok{color:var(--g)}.msg.bad{color:#ff7a88}
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#2a1040;border:1px solid var(--p);padding:12px 20px;border-radius:12px;z-index:20;max-width:80vw}
 @media(max-width:800px){.panels{grid-template-columns:1fr}}
+.mini{background:transparent;border:0;padding:0 6px;float:right;font-size:15px;opacity:.7}.mini:hover{opacity:1}
+.dots{display:flex;gap:6px;flex:1;margin:0 16px}.dots i{width:28px;height:6px;border-radius:3px;background:var(--line)}.dots i.on{background:linear-gradient(90deg,var(--g),var(--p))}
+#final{min-height:340px;font:13.5px/1.55 Consolas,monospace}
