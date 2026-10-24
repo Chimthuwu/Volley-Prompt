@@ -4,7 +4,7 @@ const store = {
   get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
 };
-let finalText = '';
+
 
 function toast(msg, ms = 6000) {
   const t = $('toast'); t.textContent = msg; show('toast');
@@ -57,14 +57,17 @@ $('btnStart').onclick = async () => {
 $('btnStop').onclick = () => pv.stop();
 $('btnContinue').onclick = () => { const n = $('notes').value; $('notes').value = ''; show('notesBox', false); pv.sendNotes(n); };
 $('btnFinish').onclick = () => { show('notesBox', false); pv.sendNotes(null); };
-$('btnCopy').onclick = async () => { await pv.copy(finalText); toast('Copied! Paste it into your coding AI.', 3000); };
+$('btnCopy').onclick = async () => { await pv.copy($('final').value); toast('Copied! Paste it into your coding AI.', 3000); };
+$('btnBack').onclick = () => { show('result', false); show('run', false); show('setup'); $('idea').focus(); };
+document.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => { await pv.copy($(b.dataset.copy).textContent); toast('Copied!', 1500); });
+document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.key === 'Enter' && !$('setup').classList.contains('hidden')) $('btnStart').click(); });
 $('btnAgain').onclick = () => { show('result', false); show('run', false); show('setup'); };
 
 const live = (role, on) => document.querySelector('.panel.' + role).classList.toggle('live', on);
 
 pv.onEvent((ev) => {
   switch (ev.type) {
-    case 'round': $('statusText').textContent = `Round ${ev.r} of ${ev.rounds}`; break;
+    case 'round': $('statusText').textContent = `Round ${ev.r} of ${ev.rounds}`; $('dots').innerHTML = Array.from({ length: ev.rounds }, (_, i) => `<i class="${i < ev.r ? 'on' : ''}"></i>`).join(''); break;
     case 'panel': {
       const isA = ev.role === 'author';
       (isA ? $('aOut') : $('cOut')).textContent = '';
@@ -84,15 +87,14 @@ pv.onEvent((ev) => {
     case 'await-notes': show('notesBox'); $('notes').focus(); $('notesBox').scrollIntoView({ behavior: 'smooth' }); break;
     case 'done':
       live('author', false); live('critic', false); show('notesBox', false);
-      finalText = ev.final;
-      if (!finalText) { show('run', false); show('setup'); toast('Stopped.'); break; }
-      $('final').textContent = finalText;
+      if (!ev.final) { show('run', false); show('setup'); toast('Stopped.'); break; }
+      $('final').value = ev.final;
       $('savedAt').textContent = ev.file ? `Saved to ${ev.file}` : 'Stopped early — this is the latest draft.';
       show('run', false); show('result'); break;
     case 'error':
       live('author', false); live('critic', false); show('notesBox', false);
       show('run', false);
-      if (ev.partial) { finalText = ev.partial; $('final').textContent = ev.partial; $('savedAt').textContent = 'Run failed — this is the latest draft.'; show('result'); }
+      if (ev.partial) { $('final').value = ev.partial; $('savedAt').textContent = 'Run failed — this is the latest draft.'; show('result'); }
       else show('setup');
       toast('⚠ ' + ev.message, 12000); break;
   }

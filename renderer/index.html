@@ -20,14 +20,14 @@
     </div>
     <datalist id="modelList"></datalist>
     <label class="check"><input type="checkbox" id="auto"> Hands-off mode (don't pause for my notes between rounds)</label>
-    <button class="big" id="btnStart">🚀 Start the volley</button>
+    <button class="big" id="btnStart">🚀 Start the volley</button> <span class="hint">or press Ctrl+Enter</span>
   </section>
 
   <section id="run" class="hidden">
-    <div class="status"><span id="statusText">Starting…</span><button class="ghost danger" id="btnStop">■ Stop</button></div>
+    <div class="status"><span id="statusText">Starting…</span><span id="dots" class="dots"></span><button class="ghost danger" id="btnStop">■ Stop</button></div>
     <div class="panels">
-      <div class="panel author"><h3>✍ Writer <span id="aRound"></span></h3><pre id="aOut"></pre></div>
-      <div class="panel critic"><h3>🔍 Reviewer <span id="cRound"></span></h3><pre id="cOut"></pre></div>
+      <div class="panel author"><h3>✍ Writer <span id="aRound"></span><button class="mini" data-copy="aOut" title="Copy">📋</button></h3><pre id="aOut"></pre></div>
+      <div class="panel critic"><h3>🔍 Reviewer <span id="cRound"></span><button class="mini" data-copy="cOut" title="Copy">📋</button></h3><pre id="cOut"></pre></div>
     </div>
     <div id="notesBox" class="card hidden">
       <h3>Your turn (optional)</h3>
@@ -39,8 +39,8 @@
 
   <section id="result" class="card hidden">
     <h2>🎉 Your finished prompt</h2>
-    <pre id="final"></pre>
-    <div class="row"><button class="big" id="btnCopy">📋 Copy prompt</button><button class="ghost" id="btnAgain">Start a new one</button></div>
+    <p class="hint">You can edit this before copying.</p><textarea id="final" spellcheck="false"></textarea>
+    <div class="row"><button class="big" id="btnCopy">📋 Copy prompt</button><button class="ghost" id="btnBack">✏ Tweak my idea &amp; re-run</button><button class="ghost" id="btnAgain">Start a new one</button></div>
     <p class="hint" id="savedAt"></p>
   </section>
 </main>
