@@ -5,14 +5,14 @@ Electron app: a Writer AI and a Reviewer AI (via OpenRouter) volley a prompt bac
 ## Status
 - App built (main.js / preload.js / renderer/), icon generated from `build/icon.svg`.
 - Landing site + `wrangler.jsonc` ready. **Not deployed yet** (needs user OK + `wrangler login`).
-- Download button on site points at `github.com/Chimthuwu/volleyprompt/releases/latest` — placeholder until a repo exists.
+- Repo public; v1.0.0 released. Download button -> latest/download/VolleyPrompt.-.Windows.Setup.exe (GitHub swaps spaces for dots; versionless copy; upload it with every release).
 
 ## Now
 - [ ] Deploy site: `npx wrangler login` then `npm run site:deploy`
 - [ ] Smoke-test app with a real OpenRouter key
 
 ## Next
-- [ ] Create GitHub repo, CI workflow to build installer (name: `VolleyPrompt - Windows Setup v<ver>.exe`) and fix download link
+- [ ] CI workflow to build installer (name: `VolleyPrompt - Windows Setup v<ver>.exe`)
 - [ ] Mac/Linux builds
 
 ## Later
