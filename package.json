@@ -1,6 +1,6 @@
 {
-  "name": "promptvolley",
-  "productName": "PromptVolley",
+  "name": "volleyprompt",
+  "productName": "VolleyPrompt",
   "version": "1.0.0",
   "description": "Two AIs volley your prompt back and forth until it's perfect.",
   "main": "main.js",
@@ -14,14 +14,14 @@
     "site:deploy": "wrangler deploy"
   },
   "build": {
-    "appId": "com.serge.promptvolley",
-    "productName": "PromptVolley",
+    "appId": "com.serge.volleyprompt",
+    "productName": "VolleyPrompt",
     "directories": { "output": "dist" },
     "files": ["main.js", "preload.js", "renderer/**", "build/icon.png"],
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico",
-      "artifactName": "PromptVolley - Windows Setup v${version}.${ext}"
+      "artifactName": "VolleyPrompt - Windows Setup v${version}.${ext}"
     },
     "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
   },
