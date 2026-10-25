@@ -68,11 +68,22 @@ ipcMain.handle('key:test', async (_e, k) => {
     return { ok: false, message: friendly(r.status) };
   } catch { return { ok: false, message: "Can't reach OpenRouter. Check your internet." }; }
 });
+const CHEAP_PER_M_TOKENS = 2; // $2 per million tokens (prompt+completion combined) or cheaper
 ipcMain.handle('models:list', async () => {
   try {
     const r = await fetch(`${API}/models`);
     const j = await r.json();
-    return j.data.map((m) => m.id).sort();
+    const rows = j.data.map((m) => {
+      const prompt = parseFloat(m.pricing?.prompt || '0') || 0;
+      const completion = parseFloat(m.pricing?.completion || '0') || 0;
+      const perM = (prompt + completion) * 1e6;
+      const isFree = perM === 0 || /:free$/i.test(m.id);
+      const isStealth = /stealth|cloak/i.test(m.id) || /stealth|cloak/i.test(m.name || '');
+      return { id: m.id, perM, isFree, isStealth };
+    }).filter((m) => m.isFree || m.isStealth || m.perM <= CHEAP_PER_M_TOKENS);
+    const rank = (m) => (m.isFree ? 0 : m.isStealth ? 1 : 2);
+    rows.sort((a, b) => rank(a) - rank(b) || a.perM - b.perM || a.id.localeCompare(b.id));
+    return rows.map((m) => m.id);
   } catch { return []; }
 });
 ipcMain.handle('clipboard:write', (_e, t) => { clipboard.writeText(t); return true; });

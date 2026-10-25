@@ -12,8 +12,8 @@ function toast(msg, ms = 6000) {
 }
 
 (async () => {
-  $('author').value = store.get('author', 'openai/gpt-4o');
-  $('critic').value = store.get('critic', 'deepseek/deepseek-chat');
+  $('author').value = store.get('author', 'deepseek/deepseek-chat-v3.1:free');
+  $('critic').value = store.get('critic', 'meta-llama/llama-3.3-70b-instruct:free');
   $('rounds').value = store.get('rounds', '3');
   $('idea').value = store.get('idea', '');
   $('auto').checked = store.get('auto', '0') === '1';
