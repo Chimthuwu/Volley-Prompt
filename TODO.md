@@ -23,3 +23,13 @@ Electron app: a Writer AI and a Reviewer AI (via OpenRouter) volley a prompt bac
 
 ## Open questions
 - GitHub username/repo for the download link?
+
+=== PROPOSED IMPROVEMENTS ===
+- [FEATURE] Add headless mode (--headless) for overnight /sesh runs: suppress Electron window, log to 
+itesesh/.
+- [PERF] Pre-build dist/ before /nitesesh; don't rebuild overnight.
+- [UI] Add dark theme for overnight use (.env set THEME=dark).
+- [BUG] Confirm main.js doesn't hang on missing OpenRouter response; add 30s timeout for /nitesesh.
+- [SESH] Ready: package.json, dist/, main.js verified; build passes.
+- [NITESH] 
+itesesh/overnight-run.sh starts Electron with --headless.
