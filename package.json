@@ -23,6 +23,16 @@
       "icon": "build/icon.ico",
       "artifactName": "VolleyPrompt - Windows Setup v${version}.${ext}"
     },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.icns",
+      "artifactName": "VolleyPrompt - macOS v${version}.${ext}"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png",
+      "artifactName": "VolleyPrompt - Linux v${version}.${ext}"
+    },
     "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
   },
   "devDependencies": {

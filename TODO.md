@@ -8,12 +8,12 @@ Electron app: a Writer AI and a Reviewer AI (via OpenRouter) volley a prompt bac
 - Repo public; v1.0.0 released. Download button -> latest/download/VolleyPrompt.-.Windows.Setup.exe (GitHub swaps spaces for dots; versionless copy; upload it with every release).
 
 ## Now
-- [ ] Deploy site: `npx wrangler login` then `npm run site:deploy`
-- [ ] Smoke-test app with a real OpenRouter key
+- [!] Deploy site: `npx wrangler login` then `npm run site:deploy` (needs wrangler auth + outward deploy)
+- [!] Smoke-test app with a real OpenRouter key (needs credential)
 
 ## Next
-- [ ] CI workflow to build installer (name: `VolleyPrompt - Windows Setup v<ver>.exe`)
-- [ ] Mac/Linux builds
+- [x] CI workflow to build installer (name: `VolleyPrompt - Windows Setup v<ver>.exe`)
+- [x] Mac/Linux builds
 
 ## Later
 - Markdown rendering in panels, custom rubric editor, run-history browser
