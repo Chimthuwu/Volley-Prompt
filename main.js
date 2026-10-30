@@ -22,7 +22,7 @@ let win, current = null;
 function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 860, minWidth: 900, minHeight: 600,
-    backgroundColor: '#0b0820', title: 'VolleyPrompt',
+    backgroundColor: '#07050f', title: 'VolleyPrompt', frame: false,
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
@@ -88,44 +88,78 @@ ipcMain.handle('models:list', async () => {
 });
 ipcMain.handle('clipboard:write', (_e, t) => { clipboard.writeText(t); return true; });
 ipcMain.handle('folder:open', () => { fs.mkdirSync(runsDir(), { recursive: true }); shell.openPath(runsDir()); });
+ipcMain.handle('window:minimize', () => win.minimize());
+ipcMain.handle('window:maximize', () => { if (win.isMaximized()) win.unmaximize(); else win.maximize(); });
+ipcMain.handle('window:close', () => win.close());
+ipcMain.handle('runs:list', () => {
+  fs.mkdirSync(runsDir(), { recursive: true });
+  return fs.readdirSync(runsDir()).filter(f => f.endsWith('-final.md')).map(f => ({ name: f, path: path.join(runsDir(), f) })).sort((a,b)=>b.name.localeCompare(a.name));
+});
 ipcMain.handle('url:open', (_e, u) => { if (/^https:\/\//.test(u)) shell.openExternal(u); });
 
+const IDLE_MS = 30000; // no bytes for this long means the stream stalled
+
 async function stream(key, model, system, messages, signal, onDelta) {
-  const req = () => fetch(`${API}/chat/completions`, {
-    method: 'POST', signal,
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'VolleyPrompt' },
-    body: JSON.stringify({ model, stream: true, messages: [{ role: 'system', content: system }, ...messages] }),
-  });
-  let res;
-  for (let attempt = 0; ; attempt++) {
-    try { res = await req(); } catch (e) {
-      if (signal.aborted) throw e;
-      if (attempt < 2) { await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); continue; }
-      throw new Error("Can't reach OpenRouter. Check your internet.");
+  // Own controller: an idle stall can cancel the request without pretending the user hit Stop,
+  // and a user Stop still cancels the request through the run's signal.
+  const ctl = new AbortController();
+  let idle = null, stalled = false;
+  const arm = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => { stalled = true; ctl.abort(); }, IDLE_MS);
+  };
+  const onStop = () => ctl.abort();
+  if (signal) { if (signal.aborted) ctl.abort(); else signal.addEventListener('abort', onStop, { once: true }); }
+  const stall = () => new Error(`The model stopped responding (nothing for ${IDLE_MS / 1000}s). Try again or pick a different model.`);
+
+  try {
+    const req = () => fetch(`${API}/chat/completions`, {
+      method: 'POST', signal: ctl.signal,
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'VolleyPrompt' },
+      body: JSON.stringify({ model, stream: true, messages: [{ role: 'system', content: system }, ...messages] }),
+    });
+    let res;
+    for (let attempt = 0; ; attempt++) {
+      arm();
+      try { res = await req(); } catch (e) {
+        if (stalled) throw stall();
+        if (ctl.signal.aborted) throw e;
+        if (attempt < 2) { await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); continue; }
+        throw new Error("Can't reach OpenRouter. Check your internet.");
+      }
+      if ((res.status === 429 || res.status >= 500) && attempt < 2) { await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); continue; }
+      break;
     }
-    if ((res.status === 429 || res.status >= 500) && attempt < 2) { await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); continue; }
-    break;
-  }
-  if (!res.ok) throw new Error(friendly(res.status, await res.text().catch(() => '')));
-  const dec = new TextDecoder();
-  let buf = '', text = '';
-  for await (const chunk of res.body) {
-    buf += dec.decode(chunk, { stream: true });
-    let i;
-    while ((i = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') continue;
-      let j;
-      try { j = JSON.parse(data); } catch { continue; }
-      if (j.error) throw new Error(j.error.message || 'Model error');
-      const d = j.choices?.[0]?.delta?.content;
-      if (d) { text += d; onDelta(d); }
+    if (!res.ok) throw new Error(friendly(res.status, await res.text().catch(() => '')));
+    const dec = new TextDecoder();
+    let buf = '', text = '';
+    arm();
+    for await (const chunk of res.body) {
+      arm();
+      buf += dec.decode(chunk, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (data === '[DONE]') continue;
+        let j;
+        try { j = JSON.parse(data); } catch { continue; }
+        if (j.error) throw new Error(j.error.message || 'Model error');
+        const d = j.choices?.[0]?.delta?.content;
+        if (d) { text += d; onDelta(d); }
+      }
     }
+    if (!text.trim()) throw new Error('The model returned nothing. Try a different model.');
+    return text;
+  } catch (e) {
+    // A stall surfaces as an AbortError, so translate it into something the user can act on.
+    if (stalled) throw stall();
+    throw e;
+  } finally {
+    clearTimeout(idle);
+    if (signal) signal.removeEventListener('abort', onStop);
   }
-  if (!text.trim()) throw new Error('The model returned nothing. Try a different model.');
-  return text;
 }
 
 const verdictOf = (t) => {

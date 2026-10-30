@@ -63,7 +63,39 @@ document.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => 
 document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.key === 'Enter' && !$('setup').classList.contains('hidden')) $('btnStart').click(); });
 $('btnAgain').onclick = () => { show('result', false); show('run', false); show('setup'); };
 
-const live = (role, on) => document.querySelector('.panel.' + role).classList.toggle('live', on);
+$('tbMin').onclick = () => pv.winMin();
+$('tbMax').onclick = () => pv.winMax();
+$('tbClose').onclick = () => pv.winClose();
+$('btnNewChat').onclick = () => { show('result',false); show('run',false); show('setup'); $('idea').value=''; $('idea').focus(); };
+
+async function loadHistory() {
+  const items = await pv.runs();
+  $('history').innerHTML = items.map((r) => `<div class="hist-item" data-path="${r.path}">${r.name.replace('-final.md','')}</div>`).join('');
+  document.querySelectorAll('.hist-item').forEach((el) => el.onclick = async () => {
+    const t = await (window.pv.copy && 0); // noop
+  });
+}
+loadHistory();
+
+// animated background
+const c = $('bgCanvas'); const ctx = c.getContext('2d');
+function resize(){ c.width=innerWidth; c.height=innerHeight; }
+resize(); addEventListener('resize', resize);
+let t=0;
+function frame(){ t+=0.008; ctx.clearRect(0,0,c.width,c.height);
+  for(let i=0;i<60;i++){
+    const x=(Math.sin(t*0.7+i*1.3)*0.5+0.5)*c.width;
+    const y=(Math.cos(t*0.5+i*0.9)*0.5+0.5)*c.height;
+    const r=1+Math.sin(t+i)*1;
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fillStyle=`rgba(${i%2?0:176},${i%2?240:38},${i%2?255:255},${0.25+Math.sin(t+i)*0.15})`;
+    ctx.fill();
+  }
+  requestAnimationFrame(frame);
+}
+frame();
+const panelOf = (role) => document.querySelector('.panel.' + role);
+const streaming = (role, on) => panelOf(role).classList.toggle('streaming', on);
 
 pv.onEvent((ev) => {
   switch (ev.type) {
@@ -72,7 +104,7 @@ pv.onEvent((ev) => {
       const isA = ev.role === 'author';
       (isA ? $('aOut') : $('cOut')).textContent = '';
       (isA ? $('aRound') : $('cRound')).textContent = `· round ${ev.r}`;
-      live('author', isA); live('critic', !isA);
+      streaming('author', isA); streaming('critic', !isA);
       $('statusText').textContent = isA ? `✍ Writer is drafting (round ${ev.r})…` : `🔍 Reviewer is reading (round ${ev.r})…`;
       break;
     }
@@ -81,18 +113,18 @@ pv.onEvent((ev) => {
       o.textContent += ev.text; o.scrollTop = o.scrollHeight; break;
     }
     case 'verdict':
-      live('critic', false);
+      streaming('critic', false);
       $('statusText').textContent = ev.verdict === 'APPROVE' ? '✅ Reviewer approved!' : '↻ Reviewer wants changes';
       break;
     case 'await-notes': show('notesBox'); $('notes').focus(); $('notesBox').scrollIntoView({ behavior: 'smooth' }); break;
     case 'done':
-      live('author', false); live('critic', false); show('notesBox', false);
+      streaming('author', false); streaming('critic', false); show('notesBox', false);
       if (!ev.final) { show('run', false); show('setup'); toast('Stopped.'); break; }
       $('final').value = ev.final;
       $('savedAt').textContent = ev.file ? `Saved to ${ev.file}` : 'Stopped early — this is the latest draft.';
       show('run', false); show('result'); break;
     case 'error':
-      live('author', false); live('critic', false); show('notesBox', false);
+      streaming('author', false); streaming('critic', false); show('notesBox', false);
       show('run', false);
       if (ev.partial) { $('final').value = ev.partial; $('savedAt').textContent = 'Run failed — this is the latest draft.'; show('result'); }
       else show('setup');

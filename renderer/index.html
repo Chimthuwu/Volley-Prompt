@@ -1,14 +1,27 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
-<title>VolleyPrompt</title><link rel="stylesheet" href="style.css"></head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:">
+<title>VolleyPrompt</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap">
+<link rel="stylesheet" href="style.css"></head>
 <body>
-<header>
-  <div class="brand"><img src="icon.svg" alt=""><h1>Volley<span>Prompt</span></h1></div>
-  <div class="hbtns"><button class="ghost" id="btnFolder">📁 Saved runs</button> <button class="ghost" id="btnSettings">⚙ Settings</button></div>
-</header>
-
-<main>
+<div class="titlebar" id="titlebar">
+  <div class="tb-brand"><img src="icon.svg" alt=""><span>Volley<span>Prompt</span></span></div>
+  <div class="tb-controls">
+    <button class="tb-btn" id="tbMin" title="Minimize">─</button>
+    <button class="tb-btn" id="tbMax" title="Maximize">□</button>
+    <button class="tb-btn tb-close" id="tbClose" title="Close">✕</button>
+  </div>
+</div>
+<div class="shell">
+  <aside class="sidebar">
+    <button class="newchat" id="btnNewChat">+ New volley</button>
+    <div class="side-label">History</div>
+    <div class="history" id="history"></div>
+  </aside>
+  <main>
   <section id="setup" class="card">
     <h2>1 · What do you want to build?</h2>
     <p class="hint">Just ramble. A rough idea is fine — the AIs will do the hard part.</p>
@@ -20,11 +33,11 @@
     </div>
     <datalist id="modelList"></datalist>
     <label class="check"><input type="checkbox" id="auto"> Hands-off mode (don't pause for my notes between rounds)</label>
-    <button class="big" id="btnStart">🚀 Start the volley</button> <span class="hint">or press Ctrl+Enter</span>
+    <button class="big" id="btnStart">Start the volley</button> <span class="hint">or press Ctrl+Enter</span>
   </section>
 
   <section id="run" class="hidden">
-    <div class="status"><span id="statusText">Starting…</span><span id="dots" class="dots"></span><button class="ghost danger" id="btnStop">■ Stop</button></div>
+    <div class="status"><span id="statusText" class="round-indicator">Starting…</span><span id="dots" class="dots"></span><button class="ghost danger" id="btnStop">■ Stop</button></div>
     <div class="panels">
       <div class="panel author"><h3>✍ Writer <span id="aRound"></span><button class="mini" data-copy="aOut" title="Copy">📋</button></h3><pre id="aOut"></pre></div>
       <div class="panel critic"><h3>🔍 Reviewer <span id="cRound"></span><button class="mini" data-copy="cOut" title="Copy">📋</button></h3><pre id="cOut"></pre></div>
@@ -43,7 +56,8 @@
     <div class="row"><button class="big" id="btnCopy">📋 Copy prompt</button><button class="ghost" id="btnBack">✏ Tweak my idea &amp; re-run</button><button class="ghost" id="btnAgain">Start a new one</button></div>
     <p class="hint" id="savedAt"></p>
   </section>
-</main>
+  </main>
+</div>
 
 <div id="modal" class="modal hidden"><div class="card">
   <h2 id="modalTitle">Welcome! One-time setup</h2>
@@ -58,5 +72,6 @@
   <p class="hint">Your key is stored encrypted on this computer only.</p>
 </div></div>
 <div id="toast" class="toast hidden"></div>
+<canvas id="bgCanvas"></canvas>
 <script src="app.js"></script>
 </body></html>
