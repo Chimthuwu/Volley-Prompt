@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="style.css"></head>
 <body>
 <div class="titlebar" id="titlebar">
-  <div class="tb-brand"><img src="icon.svg" alt=""><span>Volley<span>Prompt</span></span></div>
+  <div class="tb-brand"><button class="tb-btn sidebar-toggle" id="btnSidebarToggle" title="Toggle sidebar" aria-label="Toggle sidebar" aria-expanded="true">☰</button><img src="icon.svg" alt=""><span>Volley<span>Prompt</span></span></div>
   <div class="tb-controls">
     <button class="tb-btn" id="tbMin" title="Minimize">─</button>
     <button class="tb-btn" id="tbMax" title="Maximize">□</button>
@@ -20,12 +20,26 @@
     <button class="newchat" id="btnNewChat">+ New volley</button>
     <div class="side-label">History</div>
     <div class="history" id="history"></div>
+    <div class="sidebar-footer">
+      <button class="icon-btn" id="btnSettings" title="Settings" aria-label="Settings">⚙</button>
+      <button class="icon-btn" id="btnFolder" title="Open saved runs folder" aria-label="Open saved runs folder">📂</button>
+    </div>
   </aside>
   <main>
   <section id="setup" class="card">
     <h2>1 · What do you want to build?</h2>
     <p class="hint">Just ramble. A rough idea is fine — the AIs will do the hard part.</p>
-    <textarea id="idea" placeholder="e.g. A 2D pixel-art platformer where you play a cat stealing fish from a ship…"></textarea>
+    <div class="editor-wrapper" id="editorWrapper">
+      <textarea id="idea" placeholder="e.g. A 2D pixel-art platformer where you play a cat stealing fish from a ship…"></textarea>
+      <div class="attachment-tray hidden" id="attachment-tray"></div>
+      <div class="editor-toolbar">
+        <button type="button" class="icon-btn" id="attach-btn" title="Attach files" aria-label="Attach files">📎</button>
+        <input type="file" id="file-input" multiple hidden accept=".png,.jpg,.jpeg,.webp,.pdf,.txt,.md,.markdown,.json,.csv,.js,.jsx,.ts,.tsx,.py,.html,.htm,.css">
+        <button type="button" class="icon-btn" id="folder-btn" title="Attach a project folder" aria-label="Attach a project folder">📁</button>
+        <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
+        <button type="button" class="icon-btn" id="mic-btn" title="Voice input" aria-label="Voice input" disabled>🎤</button>
+      </div>
+    </div>
     <div class="row">
       <label>✍ Writer AI <small>writes the prompt</small><input id="author" list="modelList" spellcheck="false"></label>
       <label>🔍 Reviewer AI <small>picks it apart</small><input id="critic" list="modelList" spellcheck="false"></label>
