@@ -19,7 +19,7 @@ Pick a **Writer AI** and a **Reviewer AI**. The Writer drafts your prompt, the R
 <img src="https://raw.githubusercontent.com/Chimthuwu/Volley-Prompt/main/docs/gifs/02-volley.gif" alt="Writer and Reviewer volleying a prompt back and forth" width="100%">
 
 <p align="center"><b>Copying the finished, approved prompt:</b></p>
-<img src="https://raw.githubusercontent.com/Chimthuwu/Volley-Prompt/main/docs/gifs/03-result.gif" alt="Copying the finished, approved prompt" width="100%">
+<img src="https://raw.githubusercontent.com/Chimthuwu/Volley-Prompt/main/docs/screenshots/result.png" alt="The finished, approved prompt ready to copy" width="100%">
 
 ## Features
 
