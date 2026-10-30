@@ -766,9 +766,9 @@ a:hover { text-decoration: underline; text-shadow: 0 0 10px rgba(0, 240, 255, 0.
 .newchat { width:100%; background:linear-gradient(90deg,var(--neon-cyan),var(--neon-purple)); color:#000; font:800 13px/1 var(--font-display); text-transform:uppercase; letter-spacing:1.5px; border-radius:8px; padding:11px; }
 .newchat:hover { box-shadow:0 0 20px rgba(0,240,255,0.6); transform:scale(1.02); }
 .side-label { font:700 11px/1 var(--font-display); letter-spacing:2px; text-transform:uppercase; color:var(--dim); margin-top:6px; }
-.history { flex:1; overflow:auto; display:flex; flex-direction:column; gap:6px; }
-.hist-item { padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:12.5px; cursor:pointer; transition:0.25s; color:var(--txt); }
-.hist-item:hover { border-color:var(--neon-cyan); color:var(--neon-cyan); box-shadow:0 0 12px -4px var(--neon-cyan); transform:translateX(2px); }
+.history { flex:1; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:6px; padding:2px 4px 2px 0; }
+.hist-item { padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:12.5px; cursor:pointer; transition:0.25s; color:var(--txt); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.hist-item:hover { border-color:var(--neon-cyan); color:var(--neon-cyan); box-shadow:0 0 12px -4px var(--neon-cyan); }
 main { flex:1; overflow:auto; padding:24px; max-width:none; margin:0; display:flex; flex-direction:column; justify-content:center; }
 
 #bgCanvas { position:fixed; inset:0; z-index:-2; pointer-events:none; }

@@ -693,10 +693,17 @@ $('btnNewChat').onclick = () => { show('result',false); show('run',false); show(
 
 async function loadHistory() {
   const items = await pv.runs();
-  $('history').innerHTML = items.map((r) => `<div class="hist-item" data-path="${r.path}" title="${r.name.replace('-final.md','')}">${r.title || r.name.replace('-final.md','')}</div>`).join('');
-  document.querySelectorAll('.hist-item').forEach((el) => el.onclick = async () => {
-    const t = await (window.pv.copy && 0); // noop
-  });
+  const history = $('history');
+  history.textContent = '';
+  for (const r of items) {
+    const stamp = r.name.replace('-final.md', '');
+    const el = document.createElement('div');
+    el.className = 'hist-item';
+    el.dataset.path = r.path;
+    el.title = stamp; // r.title is user-controlled (the idea's first line) — never into innerHTML/attributes unescaped
+    el.textContent = r.title || stamp;
+    history.appendChild(el);
+  }
 }
 loadHistory();
 
