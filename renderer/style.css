@@ -27,7 +27,7 @@
 
   /* Type */
   --font-display: "Orbitron", "Rajdhani", system-ui, sans-serif;
-  --font-ui: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+  --font-ui: "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "Space Mono", ui-monospace, Consolas, monospace;
 }
 
@@ -769,6 +769,6 @@ a:hover { text-decoration: underline; text-shadow: 0 0 10px rgba(0, 240, 255, 0.
 .history { flex:1; overflow:auto; display:flex; flex-direction:column; gap:6px; }
 .hist-item { padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:12.5px; cursor:pointer; transition:0.25s; color:var(--txt); }
 .hist-item:hover { border-color:var(--neon-cyan); color:var(--neon-cyan); box-shadow:0 0 12px -4px var(--neon-cyan); transform:translateX(2px); }
-main { flex:1; overflow:auto; padding:24px; max-width:none; margin:0; }
+main { flex:1; overflow:auto; padding:24px; max-width:none; margin:0; display:flex; flex-direction:column; justify-content:center; }
 
 #bgCanvas { position:fixed; inset:0; z-index:-2; pointer-events:none; }
