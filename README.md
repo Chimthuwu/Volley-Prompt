@@ -9,11 +9,16 @@
 
 </div>
 
-![VolleyPrompt composer](docs/screenshots/composer.png)
+![VolleyPrompt composer](docs/gifs/01-composer.gif)
 
 ## How it works
 
 Pick a **Writer AI** and a **Reviewer AI**. The Writer drafts your prompt, the Reviewer critiques it, and they go back and forth until the Reviewer approves — then you copy the final prompt.
+
+<p align="center">
+  <img src="docs/gifs/02-volley.gif" alt="Writer and Reviewer volleying a prompt back and forth" width="49%">
+  <img src="docs/gifs/03-result.gif" alt="Copying the finished, approved prompt" width="49%">
+</p>
 
 ## Features
 
