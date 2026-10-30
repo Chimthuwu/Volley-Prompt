@@ -102,6 +102,7 @@ $('btnSaveKey').onclick = async () => {
   if (r.ok) { await pv.saveKey(k); setTimeout(() => show('modal', false), 700); }
 };
 
+let runAbandoned = false;
 $('btnStart').onclick = async () => {
   const idea = $('idea').value.trim();
   if (!idea) { toast('Type your idea first 🙂'); $('idea').focus(); return; }
@@ -125,6 +126,7 @@ $('btnStart').onclick = async () => {
     btnStart.disabled = false; btnStart.textContent = originalLabel;
   }
 
+  runAbandoned = false;
   $('aOut').textContent = $('cOut').textContent = '';
   $('aRound').textContent = $('cRound').textContent = '';
   show('setup', false); show('result', false); show('notesBox', false); show('run');
@@ -689,7 +691,14 @@ $('idea').addEventListener('paste', (e) => {
 $('tbMin').onclick = () => pv.winMin();
 $('tbMax').onclick = () => pv.winMax();
 $('tbClose').onclick = () => pv.winClose();
-$('btnNewChat').onclick = () => { show('result',false); show('run',false); show('setup'); $('idea').value=''; $('idea').focus(); };
+$('btnNewChat').onclick = () => {
+  // Reachable at any time, including mid-run — without stopping it first, the backend keeps
+  // streaming in the background and its eventual done/error event would later yank the view
+  // away from whatever the user's doing here.
+  runAbandoned = true;
+  pv.stop();
+  show('result',false); show('run',false); show('setup'); $('idea').value=''; $('idea').focus();
+};
 
 async function loadHistory() {
   const items = await pv.runs();
@@ -750,13 +759,15 @@ pv.onEvent((ev) => {
     case 'notice': toast('ℹ ' + ev.message, 8000); break;
     case 'done':
       streaming('author', false); streaming('critic', false); show('notesBox', false);
+      if (ev.file) loadHistory(); // a -final.md just landed on disk; the sidebar list was only ever built once at startup
+      if (runAbandoned) break; // user already left via New Volley; don't yank them into a view they didn't ask for
       if (!ev.final) { show('run', false); show('setup'); toast('Stopped.'); break; }
       $('final').value = ev.final;
       $('savedAt').textContent = ev.file ? `Saved to ${ev.file}` : 'Stopped early — this is the latest draft.';
-      if (ev.file) loadHistory(); // a -final.md just landed on disk; the sidebar list was only ever built once at startup
       show('run', false); show('result'); break;
     case 'error':
       streaming('author', false); streaming('critic', false); show('notesBox', false);
+      if (runAbandoned) break;
       show('run', false);
       if (ev.partial) { $('final').value = ev.partial; $('savedAt').textContent = 'Run failed — this is the latest draft.'; show('result'); }
       else show('setup');

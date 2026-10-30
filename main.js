@@ -326,7 +326,7 @@ ipcMain.handle('run:start', async (_e, cfg) => {
   // The same images/textFiles/folders are reused for every Writer round (via history) and
   // every Reviewer round (rebuilt per-round below) — nothing is dropped after round 1.
   const history = [{ role: 'user', content: buildUserContent(`Write the prompt for this idea:\n\n${idea}`, images, textFiles, folders) }];
-  let draft = '';
+  let draft = '', finalSaved = false;
   try {
     for (let r = 1; r <= rounds; r++) {
       send({ type: 'round', r, rounds });
@@ -359,15 +359,27 @@ ipcMain.handle('run:start', async (_e, cfg) => {
       history.push({ role: 'user', content: follow });
       log.push(`### Your notes\n\n${notes || '(none)'}\n`);
     }
-    const finalPath = path.join(runsDir(), `${stamp}-final.md`);
-    fs.writeFileSync(finalPath, draft);
-    log.push('## Final prompt\n', draft);
-    fs.writeFileSync(logPath, log.join('\n'));
-    send({ type: 'done', final: draft, file: finalPath });
+    // Stop also resolves the notes wait with null (so it doesn't hang forever), which looks
+    // identical to "Finish here" unless we check the abort signal — without this check, hitting
+    // Stop while paused between rounds silently saved and approved the draft instead of stopping.
+    if (ctl.signal.aborted) {
+      send({ type: 'done', final: draft, file: '', stopped: true });
+    } else {
+      const finalPath = path.join(runsDir(), `${stamp}-final.md`);
+      fs.writeFileSync(finalPath, draft);
+      finalSaved = true;
+      log.push('## Final prompt\n', draft);
+      fs.writeFileSync(logPath, log.join('\n'));
+      send({ type: 'done', final: draft, file: finalPath });
+    }
   } catch (e) {
     if (ctl.signal.aborted) send({ type: 'done', final: draft, file: '', stopped: true });
     else send({ type: 'error', message: e.message || String(e), partial: draft });
-  } finally { current = null; }
+  } finally {
+    current = null;
+    // No -final.md means runs:list will never surface this run, so its .title sidecar is dead weight.
+    if (!finalSaved) { try { fs.unlinkSync(path.join(runsDir(), `${stamp}.title`)); } catch {} }
+  }
 });
 
 ipcMain.handle('run:notes', (_e, notes) => { current?.resolveNotes?.(notes); });
