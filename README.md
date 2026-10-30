@@ -4,7 +4,7 @@
 
 **Stop settling for mediocre AI responses. Let two AIs battle it out to make your prompt perfect.**
 
-[![Download for Windows](https://img.shields.io/badge/Download-Windows%20.exe-blue?style=for-the-badge&logo=windows)](https://github.com/Chimthuwu/volleyprompt/releases/latest)
+[![Download for Windows](https://img.shields.io/badge/Download-Windows%20.exe-blue?style=for-the-badge&logo=windows)](https://github.com/Chimthuwu/Volley-Prompt/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
 
 <br />
@@ -65,7 +65,7 @@ Click the paint icon in the titlebar for hue/saturation/contrast sliders — the
 ## 📦 Getting Started
 
 ### For regular users
-1. Go to the **[Releases](https://github.com/Chimthuwu/volleyprompt/releases)** page.
+1. Go to the **[Releases](https://github.com/Chimthuwu/Volley-Prompt/releases)** page.
 2. Download the latest `VolleyPrompt - Windows Setup v<version>.exe`.
 3. Install and launch the app.
 4. Drop in your **OpenRouter API key** in Settings (the gear icon in the titlebar). Get one for free at [openrouter.ai](https://openrouter.ai).
@@ -75,7 +75,7 @@ Click the paint icon in the titlebar for hue/saturation/contrast sliders — the
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Chimthuwu/volleyprompt.git
+git clone https://github.com/Chimthuwu/Volley-Prompt.git
 
 # 2. Go into the folder
 cd volleyprompt
