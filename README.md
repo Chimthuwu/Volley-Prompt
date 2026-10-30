@@ -9,16 +9,17 @@
 
 </div>
 
-![VolleyPrompt composer](docs/gifs/01-composer.gif)
+<img src="https://raw.githubusercontent.com/Chimthuwu/Volley-Prompt/main/docs/gifs/01-composer.gif" alt="Typing an idea into the VolleyPrompt composer" width="100%">
 
 ## How it works
 
 Pick a **Writer AI** and a **Reviewer AI**. The Writer drafts your prompt, the Reviewer critiques it, and they go back and forth until the Reviewer approves — then you copy the final prompt.
 
-<p align="center">
-  <img src="docs/gifs/02-volley.gif" alt="Writer and Reviewer volleying a prompt back and forth" width="49%">
-  <img src="docs/gifs/03-result.gif" alt="Copying the finished, approved prompt" width="49%">
-</p>
+<p align="center"><b>The Writer and Reviewer volleying a prompt live:</b></p>
+<img src="https://raw.githubusercontent.com/Chimthuwu/Volley-Prompt/main/docs/gifs/02-volley.gif" alt="Writer and Reviewer volleying a prompt back and forth" width="100%">
+
+<p align="center"><b>Copying the finished, approved prompt:</b></p>
+<img src="https://raw.githubusercontent.com/Chimthuwu/Volley-Prompt/main/docs/gifs/03-result.gif" alt="Copying the finished, approved prompt" width="100%">
 
 ## Features
 
