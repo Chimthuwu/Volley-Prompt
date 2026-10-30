@@ -94,6 +94,25 @@
   <div class="row"><button class="big" id="btnSaveKey">Save key</button><button class="ghost" id="btnCloseModal">Close</button></div>
   <p class="hint">Your key is stored encrypted on this computer only.</p>
 </div></div>
+<div id="contextModal" class="modal hidden"><div class="card explorer-card">
+  <div class="explorer-head">
+    <h2>Select project context</h2>
+    <button type="button" class="icon-btn" id="ctxExplorerClose" title="Close" aria-label="Close">✕</button>
+  </div>
+  <p class="hint" id="ctxRootLabel"></p>
+  <div class="explorer-body">
+    <div class="explorer-tree" id="ctxTree"></div>
+    <div class="explorer-summary">
+      <div class="ctx-summary-row"><span>Selected files</span><strong id="ctxSelCount">0</strong></div>
+      <div class="ctx-summary-row"><span>Estimated size</span><strong id="ctxSelSize">0 B</strong></div>
+      <p class="hint ctx-warning hidden" id="ctxWarning"></p>
+    </div>
+  </div>
+  <div class="row explorer-foot">
+    <button class="big" id="ctxAttach">Attach selected</button>
+    <button class="ghost" id="ctxCancel">Cancel</button>
+  </div>
+</div></div>
 <div id="toast" class="toast hidden"></div>
 <canvas id="bgCanvas"></canvas>
 <script src="app.js"></script>

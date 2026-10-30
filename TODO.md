@@ -5,14 +5,14 @@ Electron app: a Writer AI and a Reviewer AI (via OpenRouter) volley a prompt bac
 ## Status
 - App built (main.js / preload.js / renderer/), icon generated from `build/icon.svg`.
 - Landing site + `wrangler.jsonc` ready. **Not deployed yet** (needs user OK + `wrangler login`).
-- Repo is now **private** (was public v1.0.0). Download link via `latest/download/` won't work anonymously anymore — needs auth or the repo to go public again.
-- Phases 1-5 done: big composer, image/text/folder attachments wired into real OpenRouter multimodal requests (both Writer & Reviewer, persisted across rounds), collapsible sidebar, speech-to-text dictation.
+- Repo is **public** (confirmed 2026-10-30) — `latest/download/` links work anonymously.
+- Phases 1-6 done: big composer, image/text/folder attachments wired into real OpenRouter multimodal requests (both Writer & Reviewer, persisted across rounds), collapsible sidebar, speech-to-text dictation, titlebar settings/theme controls, and the Project Context Explorer (tri-state checkbox tree for picking exactly which files in a folder get attached, lazily rendered so huge folders don't freeze the DOM).
 - Desktop shortcut points at `dist\win-unpacked\VolleyPrompt.exe` — **must run `npm run dist` after every source change** or the shortcut goes stale (bit us twice already).
 
 ## Now
 - [!] Deploy site: `npx wrangler login` then `npm run site:deploy` (needs wrangler auth + outward deploy)
 - [!] Smoke-test app with a real OpenRouter key (needs credential) — vision accept/reject, reviewer-context, folder attachments all still need a live-key pass
-- [ ] In progress: titlebar settings cog (general settings) + a theme/paint icon opening a hue/sat/contrast slider dropdown
+- [x] Phase 6: Project Context Explorer (tri-state folder tree, lazy-rendered, revalidated on attach)
 
 ## Next
 - [x] CI workflow to build installer (name: `VolleyPrompt - Windows Setup v<ver>.exe`)
@@ -34,3 +34,5 @@ Electron app: a Writer AI and a Reviewer AI (via OpenRouter) volley a prompt bac
 - [BUG] Confirm main.js doesn't hang on missing OpenRouter response; add 30s timeout for /nitesesh.
 - [SESH] Ready: package.json, dist/, main.js verified; build passes.
 - [NITESH] nitesesh/overnight-run.sh starts Electron with --headless.
+
+## Inbox (agent-proposed)

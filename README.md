@@ -29,7 +29,7 @@
 
 *   **🤖 The "Volley" Effect:** You pick a **Writer AI** (e.g., GPT-4o) and a **Reviewer AI** (e.g., DeepSeek). They iterate in rounds until the Reviewer actually *approves* the prompt.
 *   **🖼️ "Here, look at this":** Don't just describe your UI. Paste a screenshot. Drop an image. Vision-capable models can literally see what you're talking about — VolleyPrompt checks the model supports it before sending, so you're never left guessing why a request failed.
-*   **📁 Drop an entire folder:** Coding a project? Attach your source folder. VolleyPrompt filters out junk (`node_modules`, `.git`, `dist`, lockfiles, `.env` and other secrets) and only reads actual source files, so the AI gets exactly what it needs and nothing it shouldn't.
+*   **📁 Drop an entire folder, pick exactly what goes in:** Coding a project? Attach your source folder and the **Project Context Explorer** opens — a checkbox tree of every eligible file (junk like `node_modules`, `.git`, `dist`, lockfiles, `.env` and other secrets is filtered out automatically). Tick/untick individual files or whole subtrees, watch the selected-file count and estimated size update live, then attach just what the AI actually needs.
 *   **🎙️ Just talk it out:** Don't feel like typing? Hit the microphone and ramble your idea. It transcribes straight into the editor at your cursor.
 *   **🎨 Make it yours:** A hue/saturation/contrast panel in the titlebar retunes the whole neon accent palette live, and a collapsible sidebar gives the composer more room when you want it.
 *   **⚡ Powered by OpenRouter:** Access models from OpenAI, Anthropic, Google, DeepSeek and more, all in one place — filtered to free/cheap/stealth models by default so you don't rack up a bill by accident.
@@ -57,8 +57,8 @@ Click the paint icon in the titlebar for hue/saturation/contrast sliders — the
 
 ## 🗺️ Roadmap
 
-*   **Project Context Explorer** — a file-tree view to tick/untick exactly which files and folders get sent, instead of the whole folder. Not built yet.
 *   PDF text extraction (PDFs are currently detected and skipped with a clear notice).
+*   Search/filter input in the Project Context Explorer to find files by name.
 
 ---
 

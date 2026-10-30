@@ -567,6 +567,88 @@ pre {
   box-shadow: 0 0 40px -10px var(--neon-purple);
 }
 
+/* ============================================================
+   Phase 6 — Project Context Explorer
+   ============================================================ */
+
+.modal .explorer-card { width: min(780px, 94vw); max-height: 86vh; display: flex; flex-direction: column; }
+.explorer-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.explorer-head h2 { margin: 0; }
+#ctxRootLabel { font: 600 13px/1.4 var(--font-mono); color: var(--neon-cyan); }
+
+.explorer-body {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  margin: 10px 0 16px;
+}
+
+.explorer-tree {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  background: rgba(7, 5, 15, 0.7);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  max-height: 52vh;
+}
+.explorer-tree ul { list-style: none; margin: 0; padding-left: 20px; }
+.explorer-tree > ul { padding-left: 0; }
+.ctx-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  cursor: default;
+}
+.ctx-row:hover { background: rgba(176, 38, 255, 0.1); }
+.ctx-chevron, .ctx-spacer {
+  width: 16px;
+  flex: 0 0 16px;
+  background: transparent;
+  border: 0;
+  color: var(--dim);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
+}
+.ctx-chevron:hover { color: var(--neon-cyan); }
+.ctx-check { accent-color: var(--neon-cyan); width: 14px; height: 14px; flex: 0 0 auto; cursor: pointer; }
+.ctx-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+.ctx-dir > .ctx-row .ctx-label { font-weight: 600; }
+.ctx-count, .ctx-size { color: var(--dim); font: 400 11px/1 var(--font-mono); flex: 0 0 auto; }
+.ctx-load-more {
+  display: block;
+  margin: 4px 0 4px 20px;
+  background: transparent;
+  border: 1px dashed var(--line);
+  color: var(--neon-cyan);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.ctx-load-more:hover { border-color: var(--neon-cyan); box-shadow: 0 0 10px -4px var(--neon-cyan); }
+
+.explorer-summary {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(18, 13, 38, 0.8);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+}
+.ctx-summary-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; color: var(--dim); }
+.ctx-summary-row strong { color: var(--txt); font: 600 15px/1 var(--font-mono); }
+.ctx-warning { color: var(--neon-magenta); margin: 0; }
+
+.explorer-foot { margin: 0; justify-content: flex-end; }
+
 .steps { color: var(--dim); padding-left: 20px; }
 .steps::marker, .steps li::marker { color: var(--neon-cyan); }
 a { color: var(--neon-cyan); text-decoration: none; }

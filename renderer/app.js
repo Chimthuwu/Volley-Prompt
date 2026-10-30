@@ -287,51 +287,24 @@ function removeFolder(id) {
   renderAttachments();
 }
 
-async function handleFolderSelection(fileList) {
-  const all = Array.from(fileList);
-  if (!all.length) return;
-  const rootName = (all[0].webkitRelativePath || all[0].name).split('/')[0] || 'Project';
-  if (pendingFolders.length >= MAX_FOLDERS) { toast(`You can attach up to ${MAX_FOLDERS} project folders.`, 6000); return; }
-
-  // Metadata-only pass (sizes, paths, extensions) before any reading — so a folder that's
-  // too big gets one clear rejection instead of a partial, silently-truncated import.
-  const eligible = [];
-  for (const file of all) {
-    const rel = file.webkitRelativePath || file.name;
-    const relInFolder = rel.split('/').slice(1).join('/');
-    if (!relInFolder || isFolderPathIgnored(rel)) continue;
-    if (!FOLDER_ALLOWED_EXT.has(extOf(file.name))) continue;
-    eligible.push({ file, path: relInFolder });
-  }
-
-  if (!eligible.length) { toast(`No supported source files found in "${rootName}".`, 6000); return; }
-  if (eligible.length > MAX_FOLDER_FILES) {
-    toast(`"${rootName}" has ${eligible.length} eligible files — the limit is ${MAX_FOLDER_FILES}. Select a smaller subfolder.`, 10000); return;
-  }
-  const totalSize = eligible.reduce((s, e) => s + e.file.size, 0);
-  if (totalSize > MAX_FOLDER_TOTAL_BYTES) {
-    toast(`"${rootName}" is ${(totalSize / 1024 / 1024).toFixed(1)}MB of source — the limit is ${(MAX_FOLDER_TOTAL_BYTES / 1024 / 1024).toFixed(1)}MB. Select a smaller subfolder.`, 10000); return;
-  }
-  const tooBig = eligible.filter((e) => e.file.size > MAX_FOLDER_FILE_BYTES);
-  if (tooBig.length) {
-    toast(`"${rootName}" has files over ${Math.round(MAX_FOLDER_FILE_BYTES / 1024)}KB: ${tooBig.map((e) => e.path).join(', ')}. Remove or split them and try again.`, 12000); return;
-  }
-
-  const folder = { id: 'folder-' + (++attachmentIdSeq), kind: 'folder', name: rootName, status: 'processing', aborted: false, files: [], fileCount: eligible.length };
+// Reads the given (already-validated) entries off the main thread's path into a pendingFolders
+// entry, batch by batch, exactly like Phase 5 did — shared by the explorer's "Attach selected".
+async function readEligibleIntoFolder(entries, rootName) {
+  const folder = { id: 'folder-' + (++attachmentIdSeq), kind: 'folder', name: rootName, status: 'processing', aborted: false, files: [], fileCount: entries.length };
   pendingFolders.push(folder);
   renderAttachments();
   beginFolderProcessing();
   try {
-    for (let i = 0; i < eligible.length; i += FOLDER_READ_BATCH) {
+    for (let i = 0; i < entries.length; i += FOLDER_READ_BATCH) {
       if (folder.aborted) return;
-      const batch = eligible.slice(i, i + FOLDER_READ_BATCH);
+      const batch = entries.slice(i, i + FOLDER_READ_BATCH);
       const texts = await Promise.all(batch.map((e) => readFileAsText(e.file).catch(() => null)));
       if (folder.aborted) return;
       batch.forEach((e, idx) => { if (texts[idx] !== null) folder.files.push({ path: e.path, text: texts[idx] }); });
       renderAttachments();
     }
     if (folder.aborted) return;
-    const skipped = eligible.length - folder.files.length;
+    const skipped = entries.length - folder.files.length;
     folder.status = 'ready'; folder.fileCount = folder.files.length;
     if (skipped) toast(`"${rootName}": ${skipped} file(s) couldn't be read and were skipped.`, 8000);
     renderAttachments();
@@ -344,6 +317,223 @@ async function handleFolderSelection(fileList) {
     endFolderProcessing();
   }
 }
+
+// ---- Phase 6: Project Context Explorer — tri-state folder tree, lazily rendered ----
+const CTX_RENDER_BATCH = 200;
+let ctxState = null; // { rootName, fileMap: Map<relPath,File>, tree, selected: Set<relPath> }
+
+function buildFolderTree(eligible) {
+  const root = { name: '', type: 'dir', path: '', children: new Map() };
+  for (const { path, file } of eligible) {
+    const segs = path.split('/');
+    let node = root;
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      const isLeaf = i === segs.length - 1;
+      const childPath = node.path ? `${node.path}/${seg}` : seg;
+      if (!node.children.has(seg)) {
+        node.children.set(seg, isLeaf
+          ? { name: seg, type: 'file', path: childPath, size: file.size, file }
+          : { name: seg, type: 'dir', path: childPath, children: new Map() });
+      }
+      node = node.children.get(seg);
+    }
+  }
+  return root;
+}
+
+const sortedChildren = (node) => Array.from(node.children.values()).sort((a, b) =>
+  a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name));
+
+// Memoized: the tree is static once built, so each directory's flattened file list is computed once.
+function descendantFiles(node) {
+  if (node.type === 'file') return [node];
+  if (node._files) return node._files;
+  const out = [];
+  for (const c of node.children.values()) out.push(...descendantFiles(c));
+  node._files = out;
+  return out;
+}
+
+function nodeSelectionState(node) {
+  const files = descendantFiles(node);
+  if (!files.length) return 'none';
+  let selCount = 0;
+  for (const f of files) if (ctxState.selected.has(f.path)) selCount++;
+  return selCount === 0 ? 'none' : selCount === files.length ? 'all' : 'some';
+}
+
+function toggleNodeSelection(node, checked) {
+  for (const f of descendantFiles(node)) { if (checked) ctxState.selected.add(f.path); else ctxState.selected.delete(f.path); }
+  refreshCheckboxStates();
+  refreshExplorerSummary();
+}
+
+// Walks the whole (in-memory, not just rendered) tree so every checkbox that *has* been
+// rendered gets its checked/indeterminate state resynced from the selection Set — covers
+// bulk toggles on folders whose children aren't all in the DOM yet.
+function refreshCheckboxStates(node = ctxState.tree) {
+  if (node._el) {
+    const state = nodeSelectionState(node);
+    node._el.cb.checked = state === 'all';
+    node._el.cb.indeterminate = state === 'some';
+  }
+  if (node.type === 'dir') for (const c of node.children.values()) refreshCheckboxStates(c);
+}
+
+function renderCtxNode(node) {
+  const li = document.createElement('li');
+  li.className = 'ctx-node ' + (node.type === 'dir' ? 'ctx-dir' : 'ctx-file');
+  const row = document.createElement('div');
+  row.className = 'ctx-row';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox'; cb.className = 'ctx-check'; cb.dataset.path = node.path;
+  cb.onclick = (e) => { e.stopPropagation(); toggleNodeSelection(node, cb.checked); };
+
+  if (node.type === 'dir') {
+    const chevron = document.createElement('button');
+    chevron.type = 'button'; chevron.className = 'ctx-chevron'; chevron.textContent = '▶';
+    chevron.setAttribute('aria-expanded', 'false');
+    const childUl = document.createElement('ul');
+    childUl.className = 'ctx-children hidden';
+    chevron.onclick = (e) => {
+      e.stopPropagation();
+      const expanded = chevron.getAttribute('aria-expanded') === 'true';
+      chevron.setAttribute('aria-expanded', String(!expanded));
+      chevron.textContent = expanded ? '▶' : '▼';
+      childUl.classList.toggle('hidden', expanded);
+      if (!expanded && node._rendered === undefined) renderCtxChildrenBatch(node, childUl);
+    };
+    const label = document.createElement('span');
+    label.className = 'ctx-label'; label.textContent = `📁 ${node.name}`;
+    const files = descendantFiles(node);
+    const count = document.createElement('span');
+    count.className = 'ctx-count'; count.textContent = `${files.length} file${files.length === 1 ? '' : 's'}`;
+    row.append(chevron, cb, label, count);
+    li.append(row, childUl);
+    node._el = { cb };
+  } else {
+    const spacer = document.createElement('span');
+    spacer.className = 'ctx-spacer';
+    const label = document.createElement('span');
+    label.className = 'ctx-label'; label.textContent = `📄 ${node.name}`;
+    const size = document.createElement('span');
+    size.className = 'ctx-size'; size.textContent = formatSize(node.size);
+    row.append(spacer, cb, label, size);
+    li.append(row);
+    node._el = { cb };
+  }
+  return li;
+}
+
+// Only renders the next CTX_RENDER_BATCH children of `node` into `ul` — keeps directories
+// with hundreds/thousands of entries from freezing the DOM on first expand.
+function renderCtxChildrenBatch(node, ul) {
+  const kids = sortedChildren(node);
+  const start = node._rendered || 0;
+  const batch = kids.slice(start, start + CTX_RENDER_BATCH);
+  const frag = document.createDocumentFragment();
+  for (const child of batch) frag.appendChild(renderCtxNode(child));
+  const existingBtn = ul.querySelector(':scope > .ctx-load-more');
+  if (existingBtn) existingBtn.remove();
+  ul.appendChild(frag);
+  node._rendered = start + batch.length;
+  if (node._rendered < kids.length) {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'ctx-load-more';
+    btn.textContent = `Load more (${kids.length - node._rendered} remaining)`;
+    btn.onclick = (e) => { e.stopPropagation(); renderCtxChildrenBatch(node, ul); };
+    ul.appendChild(btn);
+  }
+  refreshCheckboxStates();
+}
+
+function refreshExplorerSummary() {
+  const files = Array.from(ctxState.selected, (p) => ctxState.fileMap.get(p)).filter(Boolean);
+  const totalSize = files.reduce((s, f) => s + f.size, 0);
+  $('ctxSelCount').textContent = String(files.length);
+  $('ctxSelSize').textContent = formatSize(totalSize);
+  let warn = '';
+  if (files.length > MAX_FOLDER_FILES) warn = `Too many files selected — ${files.length}/${MAX_FOLDER_FILES} max.`;
+  else if (totalSize > MAX_FOLDER_TOTAL_BYTES) warn = `Selection is ${formatSize(totalSize)} — limit is ${formatSize(MAX_FOLDER_TOTAL_BYTES)}.`;
+  const warnEl = $('ctxWarning');
+  warnEl.textContent = warn;
+  warnEl.classList.toggle('hidden', !warn);
+  $('ctxAttach').disabled = !!warn || files.length === 0;
+}
+
+function openContextExplorer(fileList) {
+  const all = Array.from(fileList);
+  if (!all.length) return;
+  const rootName = (all[0].webkitRelativePath || all[0].name).split('/')[0] || 'Project';
+
+  // No file content is read here — only name/size/webkitRelativePath, same as Phase 5's
+  // metadata-only pass. The ignore rules and extension allowlist are reused verbatim.
+  const eligible = [];
+  for (const file of all) {
+    const rel = file.webkitRelativePath || file.name;
+    const relInFolder = rel.split('/').slice(1).join('/');
+    if (!relInFolder || isFolderPathIgnored(rel)) continue;
+    if (!FOLDER_ALLOWED_EXT.has(extOf(file.name))) continue;
+    eligible.push({ path: relInFolder, file });
+  }
+  if (!eligible.length) { toast(`No supported source files found in "${rootName}".`, 6000); return; }
+
+  ctxState = {
+    rootName,
+    fileMap: new Map(eligible.map((e) => [e.path, e.file])),
+    tree: buildFolderTree(eligible),
+    selected: new Set(eligible.map((e) => e.path)), // default: whole folder, same as pre-Phase-6 behavior
+  };
+
+  $('ctxRootLabel').textContent = `📁 ${rootName} — ${eligible.length} eligible file${eligible.length === 1 ? '' : 's'}`;
+  const treeEl = $('ctxTree');
+  treeEl.textContent = '';
+  const rootUl = document.createElement('ul');
+  rootUl.className = 'ctx-children';
+  renderCtxChildrenBatch(ctxState.tree, rootUl);
+  treeEl.appendChild(rootUl);
+  refreshExplorerSummary();
+  show('contextModal');
+}
+
+function closeContextExplorer() { show('contextModal', false); ctxState = null; }
+$('ctxExplorerClose').onclick = closeContextExplorer;
+$('ctxCancel').onclick = closeContextExplorer; // Cancel means cancel: nothing in pendingFolders was touched while browsing.
+
+$('ctxAttach').onclick = async () => {
+  if (!ctxState) return;
+  const rootName = ctxState.rootName;
+  const entries = Array.from(ctxState.selected, (p) => ({ path: p, file: ctxState.fileMap.get(p) })).filter((e) => e.file);
+  if (!entries.length) { toast('Select at least one file.'); return; }
+
+  // Revalidate at attach time — selection could exceed limits even though each individual
+  // file passed the ignore/extension filter when the tree was built.
+  if (entries.length > MAX_FOLDER_FILES) {
+    toast(`Selected ${entries.length} files — the limit is ${MAX_FOLDER_FILES}. Deselect some and try again.`, 10000); return;
+  }
+  const totalSize = entries.reduce((s, e) => s + e.file.size, 0);
+  if (totalSize > MAX_FOLDER_TOTAL_BYTES) {
+    toast(`Selection is ${(totalSize / 1024 / 1024).toFixed(1)}MB — the limit is ${(MAX_FOLDER_TOTAL_BYTES / 1024 / 1024).toFixed(1)}MB.`, 10000); return;
+  }
+  const tooBig = entries.filter((e) => e.file.size > MAX_FOLDER_FILE_BYTES);
+  if (tooBig.length) {
+    toast(`Files over ${Math.round(MAX_FOLDER_FILE_BYTES / 1024)}KB: ${tooBig.map((e) => e.path).join(', ')}.`, 12000); return;
+  }
+
+  // A folder with the same root name already attached: replace it rather than stacking a duplicate.
+  const existingIdx = pendingFolders.findIndex((f) => f.name === rootName);
+  if (existingIdx === -1 && pendingFolders.length >= MAX_FOLDERS) {
+    toast(`You can attach up to ${MAX_FOLDERS} project folders.`, 6000); return;
+  }
+  if (existingIdx !== -1) {
+    pendingFolders[existingIdx].aborted = true;
+    pendingFolders.splice(existingIdx, 1);
+  }
+
+  closeContextExplorer();
+  await readEligibleIntoFolder(entries, rootName);
+};
 
 // ---- Phase 3: serialize attachments for the real request (renderer-side only; main.js re-validates) ----
 const MAX_TOTAL_SERIALIZED_CHARS = 20 * 1024 * 1024; // ~20MB of base64/text, matches main.js's budget
@@ -463,14 +653,11 @@ if (attachBtn && fileInput) {
 }
 const folderBtn = $('folder-btn'), folderInput = $('folder-input');
 if (folderBtn && folderInput) {
-  folderBtn.addEventListener('click', () => {
-    if (pendingFolders.length >= MAX_FOLDERS) { toast(`You can attach up to ${MAX_FOLDERS} project folders.`, 6000); return; }
-    folderInput.click();
-  });
+  folderBtn.addEventListener('click', () => folderInput.click());
   folderInput.addEventListener('change', () => {
     const files = folderInput.files;
     folderInput.value = '';
-    if (files && files.length) handleFolderSelection(files);
+    if (files && files.length) openContextExplorer(files);
   });
 }
 if (editorWrapper) {
