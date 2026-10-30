@@ -9,7 +9,7 @@
 
 </div>
 
-<img src="https://raw.githubusercontent.com/Chimthuwu/Volley-Prompt/main/docs/gifs/01-composer.gif" alt="Typing an idea into the VolleyPrompt composer" width="100%">
+<img src="https://raw.githubusercontent.com/Chimthuwu/Volley-Prompt/main/docs/screenshots/composer.png" alt="The VolleyPrompt composer with an idea typed in" width="100%">
 
 ## How it works
 
