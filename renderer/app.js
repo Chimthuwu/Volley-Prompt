@@ -22,6 +22,57 @@ function setSidebarCollapsed(collapsed) {
 setSidebarCollapsed(store.get('sidebarCollapsed', '0') === '1');
 $('btnSidebarToggle').onclick = () => setSidebarCollapsed(!sidebarEl.classList.contains('sidebar-collapsed'));
 
+// ---- Theme (hue/saturation/contrast) — shifts the actual accent CSS vars via HSL math,
+// so body text stays crisp and only the neon palette moves. Applied immediately to avoid
+// a flash of the default palette before the user's saved preference kicks in. ----
+const THEME_BASE_HSL = {
+  '--neon-cyan': [183, 100, 50],
+  '--neon-magenta': [344, 100, 59],
+  '--neon-green': [156, 100, 51],
+  '--neon-purple': [275, 100, 59],
+};
+function applyTheme({ hue, sat, contrast }) {
+  const root = document.documentElement.style;
+  for (const [name, [h, s, l]] of Object.entries(THEME_BASE_HSL)) {
+    const newH = ((h + hue) % 360 + 360) % 360;
+    const newS = Math.min(100, Math.max(0, s * (sat / 100)));
+    const newL = Math.min(100, Math.max(0, 50 + (l - 50) * (contrast / 100)));
+    root.setProperty(name, `hsl(${newH.toFixed(0)}, ${newS.toFixed(0)}%, ${newL.toFixed(0)}%)`);
+  }
+  // Keep the purple-tinted borders/glow in step with the shifted purple instead of
+  // staying frozen at the original hue.
+  const [ph, ps] = THEME_BASE_HSL['--neon-purple'];
+  const h2 = ((ph + hue) % 360 + 360) % 360;
+  const s2 = Math.min(100, Math.max(0, ps * (sat / 100)));
+  root.setProperty('--line', `hsla(${h2.toFixed(0)}, ${s2.toFixed(0)}%, 50%, 0.3)`);
+  root.setProperty('--line-glow', `hsla(${h2.toFixed(0)}, ${s2.toFixed(0)}%, 50%, 0.8)`);
+}
+const hueInput = $('themeHue'), satInput = $('themeSat'), contrastInput = $('themeContrast');
+hueInput.value = store.get('themeHue', '0');
+satInput.value = store.get('themeSat', '100');
+contrastInput.value = store.get('themeContrast', '100');
+function currentThemeValues() { return { hue: +hueInput.value, sat: +satInput.value, contrast: +contrastInput.value }; }
+applyTheme(currentThemeValues());
+function persistAndApplyTheme() {
+  const v = currentThemeValues();
+  applyTheme(v);
+  store.set('themeHue', v.hue); store.set('themeSat', v.sat); store.set('themeContrast', v.contrast);
+}
+[hueInput, satInput, contrastInput].forEach((el) => el.addEventListener('input', persistAndApplyTheme));
+$('btnThemeReset').onclick = () => { hueInput.value = 0; satInput.value = 100; contrastInput.value = 100; persistAndApplyTheme(); };
+
+const themeBtn = $('btnTheme'), themePanel = $('themePanel');
+function closeThemePanel() { themePanel.classList.add('hidden'); themeBtn.setAttribute('aria-expanded', 'false'); }
+themeBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const willShow = themePanel.classList.contains('hidden');
+  themePanel.classList.toggle('hidden', !willShow);
+  themeBtn.setAttribute('aria-expanded', String(willShow));
+});
+themePanel.addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('click', (e) => { if (!themePanel.classList.contains('hidden') && e.target !== themeBtn) closeThemePanel(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !themePanel.classList.contains('hidden')) closeThemePanel(); });
+
 (async () => {
   $('author').value = store.get('author', 'deepseek/deepseek-chat-v3.1:free');
   $('critic').value = store.get('critic', 'meta-llama/llama-3.3-70b-instruct:free');
@@ -455,7 +506,7 @@ $('btnNewChat').onclick = () => { show('result',false); show('run',false); show(
 
 async function loadHistory() {
   const items = await pv.runs();
-  $('history').innerHTML = items.map((r) => `<div class="hist-item" data-path="${r.path}">${r.name.replace('-final.md','')}</div>`).join('');
+  $('history').innerHTML = items.map((r) => `<div class="hist-item" data-path="${r.path}" title="${r.name.replace('-final.md','')}">${r.title || r.name.replace('-final.md','')}</div>`).join('');
   document.querySelectorAll('.hist-item').forEach((el) => el.onclick = async () => {
     const t = await (window.pv.copy && 0); // noop
   });

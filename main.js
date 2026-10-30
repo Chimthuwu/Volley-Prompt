@@ -109,7 +109,12 @@ ipcMain.handle('window:maximize', () => { if (win.isMaximized()) win.unmaximize(
 ipcMain.handle('window:close', () => win.close());
 ipcMain.handle('runs:list', () => {
   fs.mkdirSync(runsDir(), { recursive: true });
-  return fs.readdirSync(runsDir()).filter(f => f.endsWith('-final.md')).map(f => ({ name: f, path: path.join(runsDir(), f) })).sort((a,b)=>b.name.localeCompare(a.name));
+  return fs.readdirSync(runsDir()).filter(f => f.endsWith('-final.md')).map(f => {
+    const stamp = f.slice(0, -'-final.md'.length);
+    let title = '';
+    try { title = fs.readFileSync(path.join(runsDir(), `${stamp}.title`), 'utf8').trim(); } catch {}
+    return { name: f, title, path: path.join(runsDir(), f) };
+  }).sort((a,b)=>b.name.localeCompare(a.name));
 });
 ipcMain.handle('url:open', (_e, u) => { if (/^https:\/\//.test(u)) shell.openExternal(u); });
 
@@ -306,6 +311,8 @@ ipcMain.handle('run:start', async (_e, cfg) => {
   const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
   fs.mkdirSync(runsDir(), { recursive: true });
   const logPath = path.join(runsDir(), `${stamp}.md`);
+  const title = idea.trim().split('\n')[0].replace(/\s+/g, ' ').slice(0, 60);
+  fs.writeFileSync(path.join(runsDir(), `${stamp}.title`), title);
   const log = [`# VolleyPrompt ${stamp}\n`, `Author: ${author}  \nCritic: ${critic}\n`, `## Idea\n\n${idea}\n`];
   if (images.length || textFiles.length || folders.length) {
     // Metadata only — never the base64/text payload itself — so saved runs stay small and private.

@@ -10,6 +10,16 @@
 <div class="titlebar" id="titlebar">
   <div class="tb-brand"><button class="tb-btn sidebar-toggle" id="btnSidebarToggle" title="Toggle sidebar" aria-label="Toggle sidebar" aria-expanded="true">☰</button><img src="icon.svg" alt=""><span>Volley<span>Prompt</span></span></div>
   <div class="tb-controls">
+    <div class="theme-dropdown-wrap">
+      <button class="tb-btn" id="btnTheme" title="Theme" aria-label="Theme" aria-expanded="false">🎨</button>
+      <div class="theme-panel hidden" id="themePanel">
+        <label>Hue<input type="range" id="themeHue" min="-180" max="180" value="0"></label>
+        <label>Saturation<input type="range" id="themeSat" min="0" max="200" value="100"></label>
+        <label>Contrast<input type="range" id="themeContrast" min="50" max="150" value="100"></label>
+        <button type="button" class="ghost" id="btnThemeReset">Reset</button>
+      </div>
+    </div>
+    <button class="tb-btn" id="btnSettings" title="Settings" aria-label="Settings">⚙</button>
     <button class="tb-btn" id="tbMin" title="Minimize">─</button>
     <button class="tb-btn" id="tbMax" title="Maximize">□</button>
     <button class="tb-btn tb-close" id="tbClose" title="Close">✕</button>
@@ -21,7 +31,6 @@
     <div class="side-label">History</div>
     <div class="history" id="history"></div>
     <div class="sidebar-footer">
-      <button class="icon-btn" id="btnSettings" title="Settings" aria-label="Settings">⚙</button>
       <button class="icon-btn" id="btnFolder" title="Open saved runs folder" aria-label="Open saved runs folder">📂</button>
     </div>
   </aside>

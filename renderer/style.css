@@ -185,7 +185,7 @@ input:not([type=checkbox]) {
   transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
 }
 
-textarea { min-height: 170px; resize: vertical; }
+textarea { min-height: 170px; resize: vertical; border-bottom-right-radius: 3px; }
 textarea::placeholder, input::placeholder { color: #6b6591; }
 
 textarea:focus,
@@ -629,6 +629,35 @@ a:hover { text-decoration: underline; text-shadow: 0 0 10px rgba(0, 240, 255, 0.
 .tb-btn:hover { background:rgba(176,38,255,0.18); color:var(--txt); }
 .tb-close:hover { background:var(--neon-magenta); color:#fff; }
 .sidebar-toggle { -webkit-app-region:no-drag; flex-shrink:0; }
+
+.theme-dropdown-wrap { position: relative; -webkit-app-region: no-drag; }
+.theme-panel {
+  position: absolute;
+  top: 32px;
+  right: 0;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--card);
+  border: 1px solid var(--line-glow);
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.6), 0 0 24px -8px var(--neon-purple);
+  z-index: 15;
+  -webkit-app-region: no-drag;
+}
+.theme-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font: 600 11px/1 var(--font-display);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.theme-panel input[type=range] { width: 100%; accent-color: var(--neon-cyan); }
+.theme-panel .ghost { align-self: flex-end; padding: 6px 14px; font-size: 11px; }
 
 .shell { display:flex; height:calc(100vh - 34px); }
 .sidebar {
