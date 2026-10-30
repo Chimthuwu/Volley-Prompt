@@ -753,6 +753,7 @@ pv.onEvent((ev) => {
       if (!ev.final) { show('run', false); show('setup'); toast('Stopped.'); break; }
       $('final').value = ev.final;
       $('savedAt').textContent = ev.file ? `Saved to ${ev.file}` : 'Stopped early — this is the latest draft.';
+      if (ev.file) loadHistory(); // a -final.md just landed on disk; the sidebar list was only ever built once at startup
       show('run', false); show('result'); break;
     case 'error':
       streaming('author', false); streaming('critic', false); show('notesBox', false);
