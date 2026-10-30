@@ -4,7 +4,7 @@ Electron app: a Writer AI and a Reviewer AI (via OpenRouter) volley a prompt bac
 
 ## Status
 - App built (main.js / preload.js / renderer/), icon generated from `build/icon.svg`.
-- Landing site + `wrangler.jsonc` ready. **Not deployed yet** (needs user OK + `wrangler login`).
+- Landing site **deployed** to Cloudflare Pages: https://volley-prompt.pages.dev — download button + GitHub link + OG/Twitter social-embed image (`site/assets/og-image.png`). Redeploy with `npm run site:deploy`.
 - Repo is **public** (confirmed 2026-10-30) — `latest/download/` links work anonymously.
 - Phases 1-6 done: big composer, image/text/folder attachments wired into real OpenRouter multimodal requests (both Writer & Reviewer, persisted across rounds), collapsible sidebar, speech-to-text dictation, titlebar settings/theme controls, and the Project Context Explorer (tri-state checkbox tree for picking exactly which files in a folder get attached, lazily rendered so huge folders don't freeze the DOM).
 - Desktop shortcut points at `dist\win-unpacked\VolleyPrompt.exe` — **must run `npm run dist` after every source change** or the shortcut goes stale (bit us twice already).

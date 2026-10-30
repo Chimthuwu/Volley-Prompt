@@ -1,8 +1,27 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>VolleyPrompt — two AIs, one perfect prompt</title>
-<meta name="description" content="VolleyPrompt makes two AI models volley your prompt back and forth until it's rock solid.">
+<meta name="description" content="VolleyPrompt makes two AI models volley your prompt back and forth until it's rock solid. Free desktop app, bring your own OpenRouter key.">
 <link rel="icon" href="icon.svg">
+<link rel="canonical" href="https://volley-prompt.pages.dev/">
+
+<!-- Open Graph (Discord, Facebook, Slack, LinkedIn, ...) -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://volley-prompt.pages.dev/">
+<meta property="og:title" content="VolleyPrompt — two AIs, one perfect prompt">
+<meta property="og:description" content="Two AI models volley your prompt back and forth — Writer drafts, Reviewer rips it apart — until it's actually good. Free desktop app for Windows. Bring your own OpenRouter key.">
+<meta property="og:image" content="https://volley-prompt.pages.dev/assets/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="VolleyPrompt — two AIs volley your prompt until it's perfect">
+<meta property="og:site_name" content="VolleyPrompt">
+
+<!-- Twitter / X -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="VolleyPrompt — two AIs, one perfect prompt">
+<meta name="twitter:description" content="Two AI models volley your prompt back and forth until it's actually good. Free desktop app for Windows.">
+<meta name="twitter:image" content="https://volley-prompt.pages.dev/assets/og-image.png">
+
 <style>
 :root{--bg:#0b0820;--card:#161038;--line:#2d2467;--txt:#ece9ff;--dim:#9a93cc;--g:#2ef2a0;--b:#19b6ff;--p:#ff4fd8}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(1000px 600px at 50% -10%,#2b1f7a 0,transparent 60%),var(--bg);color:var(--txt);font:17px/1.6 "Segoe UI",system-ui,sans-serif;text-align:center}
@@ -10,23 +29,35 @@ main{max-width:860px;margin:0 auto;padding:64px 20px}
 img.logo{width:140px;height:140px}
 h1{font-size:clamp(40px,8vw,68px);margin:12px 0 0}h1 span{background:linear-gradient(90deg,var(--g),var(--b),var(--p));-webkit-background-clip:text;color:transparent}
 .tag{color:var(--dim);font-size:20px;margin:8px 0 28px}
-.btn{display:inline-block;background:linear-gradient(90deg,var(--g),var(--b));color:#06122a;font-weight:700;padding:14px 32px;border-radius:14px;text-decoration:none;font-size:18px}
+.cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:10px}
+.btn{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(90deg,var(--g),var(--b));color:#06122a;font-weight:700;padding:14px 32px;border-radius:14px;text-decoration:none;font-size:18px;border:0}
 .btn:hover{filter:brightness(1.1)}
-.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:56px 0;text-align:left}
+.btn.ghost{background:none;color:var(--txt);border:1px solid var(--line)}
+.btn.ghost:hover{border-color:var(--b);filter:none}
+.sub{color:var(--dim);font-size:13px;margin:0 0 40px}
+.screenshot{max-width:100%;border-radius:16px;border:1px solid var(--line);margin:8px 0 56px;box-shadow:0 20px 60px -20px rgba(0,0,0,0.6)}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:0 0 56px;text-align:left}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px}
 .card b{display:block;font-size:20px;margin-bottom:4px}.card p{margin:0;color:var(--dim);font-size:15px}
 .a{border-top:3px solid var(--g)}.c{border-top:3px solid var(--p)}.d{border-top:3px solid var(--b)}
 footer{color:var(--dim);font-size:13px}
+footer a{color:var(--b)}
 </style></head>
 <body><main>
 <img class="logo" src="icon.svg" alt="VolleyPrompt logo">
 <h1>Volley<span>Prompt</span></h1>
 <p class="tag">Stop copy-pasting between chatbots. Two AIs volley your prompt until it's perfect.</p>
-<a class="btn" href="https://github.com/Chimthuwu/Volley-Prompt/releases/latest/download/VolleyPrompt.-.Windows.Setup.exe" id="dl">Download for Windows</a>
+<div class="cta">
+<a class="btn" href="https://github.com/Chimthuwu/Volley-Prompt/releases/latest/download/VolleyPrompt.-.Windows.Setup.exe" id="dl">⬇ Download for Windows</a>
+<a class="btn ghost" href="https://github.com/Chimthuwu/Volley-Prompt" target="_blank" rel="noopener">★ View on GitHub</a>
+</div>
+<p class="sub">Free · open source (MIT) · bring your own <a href="https://openrouter.ai" style="color:var(--b)">OpenRouter</a> key</p>
+<img class="screenshot" src="assets/composer.png" alt="The VolleyPrompt composer with an idea typed in" loading="lazy">
 <div class="steps">
 <div class="card a"><b>✍ 1 · Write</b><p>Ramble your game or app idea. A Writer AI turns it into a structured prompt.</p></div>
 <div class="card c"><b>🔍 2 · Review</b><p>A different Reviewer AI rips it apart: gaps, contradictions, scope creep.</p></div>
 <div class="card d"><b>🎉 3 · Copy</b><p>Repeat until approved — or add your own notes — then copy the final prompt.</p></div>
 </div>
-<footer>Bring your own OpenRouter key · stored encrypted on your PC · nothing sent anywhere else.</footer>
+<footer>Bring your own OpenRouter key · stored encrypted on your PC · nothing sent anywhere else.<br>
+Windows installer only right now — <a href="https://github.com/Chimthuwu/Volley-Prompt" target="_blank" rel="noopener">source on GitHub</a> if you want to build it for Mac/Linux yourself.</footer>
 </main></body></html>

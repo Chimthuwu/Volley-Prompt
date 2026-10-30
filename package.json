@@ -10,8 +10,8 @@
     "start": "electron .",
     "icons": "node scripts/make-icons.mjs",
     "dist": "npm run icons && electron-builder --win --publish never",
-    "site:dev": "wrangler dev",
-    "site:deploy": "wrangler deploy"
+    "site:dev": "wrangler pages dev site",
+    "site:deploy": "wrangler pages deploy site --project-name=volley-prompt --branch=main --commit-dirty=true"
   },
   "build": {
     "appId": "com.serge.volleyprompt",
