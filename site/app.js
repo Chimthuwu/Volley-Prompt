@@ -1530,6 +1530,7 @@ async function loadHistory() {
     const el = document.createElement('div');
     el.className = 'hist-item';
     el.dataset.path = r.path;
+    el.dataset.id = r.name; // For context menu / drag-drop referencing
     el.title = stamp; // r.title is user-controlled (the idea's first line) — never into innerHTML/attributes unescaped
     el.textContent = (r.incomplete ? '✂ ' : '') + (r.title || stamp);
     // Saved finals are shown in the result view; entries without one (e.g. desktop file
@@ -1567,7 +1568,97 @@ function openHistoryItem(name) {
   const note = (when ? `Loaded from history · ${when}` : 'Loaded from history') + (item.incomplete ? ' · stopped draft' : '');
   showIdeaRecap(item.idea, note);
 }
-loadHistory();
+
+// Sidebar session management: right-click + drag-drop + folder reordering
+const contextMenu = document.getElementById('contextMenu');
+function showContextMenu(e) {
+  const item = e.currentTarget;
+  if (contextMenu) {
+    contextMenu.classList.remove('hidden');
+    contextMenu.style.left = e.pageX + 'px';
+    contextMenu.style.top = e.pageY + 'px';
+    contextMenu.dataset.targetItem = item.dataset.id || item.textContent.trim();
+  }
+}
+function hideContextMenu() {
+  if (contextMenu) {
+    contextMenu.classList.add('hidden');
+    delete contextMenu.dataset.targetItem;
+  }
+}
+document.addEventListener('click', (e) => {
+  if (contextMenu && !contextMenu.classList.contains('hidden') && !contextMenu.contains(e.target)) hideContextMenu();
+});
+
+if (contextMenu) {
+  contextMenu.addEventListener('click', (e) => {
+    const action = e.target.closest('.menu-item')?.dataset.action;
+    if (!action) return;
+    const targetItem = contextMenu.dataset.targetItem;
+    if (!targetItem) return;
+    const itemEl = document.querySelector(`.hist-item[data-id="${targetItem}"]`);
+    if (!itemEl) return;
+    
+    if (action === 'rename') {
+      const currentName = itemEl.textContent.replace(/✂ /, '').trim();
+      const newName = prompt('Enter new name:', currentName);
+      if (newName !== null) itemEl.textContent = (itemEl.dataset.incomplete ? '✂ ' : '') + newName;
+    } else if (action === 'delete') {
+      if (confirm('Delete this session?')) itemEl.remove();
+    } else if (action === 'move') {
+      const groups = Array.from(document.querySelectorAll('.history-project')).map(g => g.textContent.trim());
+      const destination = prompt('Move to folder:', groups[0] || 'Other volleys');
+      if (destination) {
+        const newGroup = Array.from(document.querySelectorAll('.history-project')).find(g => g.textContent.trim() === destination);
+        if (newGroup) newGroup.appendChild(itemEl);
+      }
+    }
+    hideContextMenu();
+  });
+}
+
+document.querySelectorAll('.hist-item').forEach(el => {
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); showContextMenu(e); });
+  el.setAttribute('draggable', 'true');
+  el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', el.dataset.id || el.textContent.trim()); el.classList.add('dragging'); });
+  el.addEventListener('dragend', (e) => el.classList.remove('dragging'));
+  el.addEventListener('dragenter', (e) => { e.preventDefault(); el.classList.add('dragover'); });
+  el.addEventListener('dragleave', () => el.classList.remove('dragover'));
+  el.addEventListener('dragover', (e) => e.preventDefault());
+  el.addEventListener('drop', (e) => {
+    e.preventDefault(); el.classList.remove('dragover');
+    const id = e.dataTransfer.getData('text/plain');
+    const src = document.querySelector(`.hist-item[data-id="${id}"]`) || Array.from(document.querySelectorAll('.hist-item')).find(h => h.textContent.trim() === id);
+    if (src && src !== el) {
+      const group = el.closest('.history-project');
+      if (group) group.appendChild(src);
+    }
+  });
+});
+
+document.querySelectorAll('.history-project').forEach(el => {
+  el.setAttribute('draggable', 'true');
+  el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', 'folder:' + el.textContent.trim()); el.classList.add('dragging'); });
+  el.addEventListener('dragend', () => el.classList.remove('dragging'));
+  el.addEventListener('dragenter', () => el.classList.add('dragover'));
+  el.addEventListener('dragleave', () => el.classList.remove('dragover'));
+  el.addEventListener('dragover', (e) => e.preventDefault());
+  el.addEventListener('drop', (e) => {
+    e.preventDefault(); el.classList.remove('dragover');
+    const id = e.dataTransfer.getData('text/plain');
+    if (id.startsWith('folder:')) {
+      const targetName = id.replace('folder:', '');
+      if (targetName !== el.textContent.trim()) {
+        const srcFolder = Array.from(document.querySelectorAll('.history-project')).find(f => f.textContent.trim() === targetName);
+        if (srcFolder) {
+          Array.from(srcFolder.children).forEach(child => {
+            if (child.classList.contains('hist-item')) el.appendChild(child);
+          });
+        }
+      }
+    }
+  });
+});
 
 // animated background
 const c = $('bgCanvas'); const ctx = c.getContext('2d');

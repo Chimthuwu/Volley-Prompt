@@ -813,6 +813,18 @@ a:hover { text-decoration: underline; text-shadow: 0 0 10px rgba(0, 240, 255, 0.
 .history { flex:1; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:6px; padding:2px 4px 2px 0; }
 .hist-item { padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:12.5px; cursor:pointer; transition:0.25s; color:var(--txt); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .hist-item:hover { border-color:var(--neon-cyan); color:var(--neon-cyan); box-shadow:0 0 12px -4px var(--neon-cyan); }
+.history-project { font:700 10px/1 var(--font-display); letter-spacing:1.5px; text-transform:uppercase; color:var(--dim); padding:2px 6px 6px 4px; margin-top:8px; border-bottom:1px solid var(--line); cursor:grab; }
+.history-project:active { cursor:grabbing; }
+/* Dragged folder/session ghost */
+.history-project.drag-ghost, .hist-item.drag-ghost { opacity:0.5; border-color:transparent; }
+.history-project.dragover, .hist-item.dragover { border-color:var(--neon-cyan); background:rgba(0,240,255,0.08); }
+/* Context menu (right-click) */
+.context-menu { position:fixed; z-index:1000; background:var(--card); border:1px solid var(--line-glow); border-radius:8px; padding:6px 0; min-width:160px; box-shadow:0 10px 40px -8px rgba(0,0,0,0.7); pointer-events:none; opacity:0; transition:opacity .15s; }
+.context-menu.visible { pointer-events:auto; opacity:1; }
+.context-menu.hidden { display:none; }
+.menu-item { padding:7px 14px; font-size:12px; color:var(--txt); cursor:pointer; white-space:nowrap; }
+.menu-item:hover { background:var(--panel-hi); color:var(--neon-cyan); }
+.menu-item.danger:hover { background:rgba(255,60,80,0.12); color:#ff3c50; }
 main { flex:1; overflow:auto; padding:24px; max-width:none; margin:0; display:flex; flex-direction:column; justify-content:center; justify-content:safe center; }
 
 #bgCanvas { position:fixed; inset:0; z-index:-2; pointer-events:none; }
