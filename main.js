@@ -4,6 +4,7 @@ const path = require('path');
 
 const API = 'https://openrouter.ai/api/v1';
 const keyFile = () => path.join(app.getPath('userData'), 'key.bin');
+const githubTokenFile = () => path.join(app.getPath('userData'), 'github-token.bin');
 const runsDir = () => path.join(app.getPath('documents'), 'VolleyPrompt');
 
 const AUTHOR_SYSTEM = `You are an expert prompt engineer. The user wants a prompt they can give to an AI coding assistant to build a game or app. Write a clear, complete, well-structured prompt: goal, tech stack, core features, constraints, scope/milestones, and what 'done' looks like. Make reasonable assumptions explicit instead of leaving gaps. When given critic feedback, revise accordingly and keep what already works. Output ONLY the prompt itself, no preamble or commentary.`;
@@ -15,7 +16,11 @@ const CRITIC_SYSTEM = `You are a harsh but fair reviewer of AI prompts. Review t
 4. Scope creep - is it too big for a first build? Is there a sensible milestone order?
 5. Testability - is it clear what 'done' means?
 
-List issues ranked by severity (HIGH / MED / LOW) with a concrete fix for each. Do not rewrite the whole prompt. Do not praise for the sake of it. End with exactly one final line: 'VERDICT: APPROVE' if there are no HIGH issues left, otherwise 'VERDICT: REVISE'.`;
+List issues ranked by severity (HIGH / MED / LOW) with a concrete fix for each. Number every issue. Do not rewrite the whole prompt. Do not praise for the sake of it. End with these exact machine-readable lines:
+FITNESS SCORE: N/100 (score clarity, completeness, consistency, scope, testability)
+VERDICT: APPROVE if there are no HIGH issues left, otherwise VERDICT: REVISE.`;
+
+const IMAGE_DESCRIPTION_SYSTEM = `You describe image attachments so a text-only reviewer can evaluate a prompt without seeing them. For each image, state: what it shows, and which product feature, UI detail, or UX moment it demonstrates. Be concrete and concise. Output ONLY the descriptions.`;
 
 let win, current = null;
 
@@ -37,11 +42,22 @@ app.whenReady().then(createWindow);
 app.on('window-all-closed', () => app.quit());
 
 // ---- key storage (encrypted with the OS when possible) ----
+let lastKeyError = '';
 function loadKey() {
+  lastKeyError = '';
   try {
     const buf = fs.readFileSync(keyFile());
-    return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buf) : buf.toString('utf8');
-  } catch { return ''; }
+    const raw = safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buf) : buf.toString('utf8');
+    // Older builds could persist a trailing newline or spaces from a paste; OpenRouter then
+    // rejects an otherwise valid key at request time. Always hand back the trimmed value.
+    const value = String(raw || '').trim();
+    if (!value) lastKeyError = 'The saved key file is empty.';
+    return value;
+  } catch (e) {
+    // ENOENT = never saved. Anything else is a real read/decrypt failure worth showing.
+    lastKeyError = e.code === 'ENOENT' ? '' : (e.message || String(e));
+    return '';
+  }
 }
 function saveKey(k) {
   fs.mkdirSync(path.dirname(keyFile()), { recursive: true });
@@ -49,24 +65,158 @@ function saveKey(k) {
   fs.writeFileSync(keyFile(), safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(k) : Buffer.from(k));
 }
 
+// GitHub tokens are never written in plaintext. When OS-backed encryption is unavailable,
+// keep the token in main-process memory for this session only.
+let githubTokenCache;
+function loadGithubToken() {
+  if (githubTokenCache !== undefined) return githubTokenCache;
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return (githubTokenCache = '');
+    githubTokenCache = safeStorage.decryptString(fs.readFileSync(githubTokenFile()));
+  } catch { githubTokenCache = ''; }
+  return githubTokenCache;
+}
+function saveGithubToken(token) {
+  const value = String(token || '').trim();
+  githubTokenCache = value;
+  if (!value) { try { fs.unlinkSync(githubTokenFile()); } catch {} return { ok: true, persisted: false }; }
+  if (!safeStorage.isEncryptionAvailable()) return { ok: true, persisted: false };
+  fs.mkdirSync(path.dirname(githubTokenFile()), { recursive: true });
+  fs.writeFileSync(githubTokenFile(), safeStorage.encryptString(value));
+  return { ok: true, persisted: true };
+}
+
+async function fetchGithubRepository(owner, repo, token) {
+  const validPart = /^[A-Za-z0-9_.-]{1,100}$/;
+  if (!validPart.test(owner) || !validPart.test(repo) || owner === '.' || owner === '..' || repo === '.' || repo === '..') {
+    return { ok: false, message: 'Invalid GitHub owner or repository name.' };
+  }
+  const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const api = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const getJson = async (url) => {
+    const response = await fetch(url, { headers });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = response.status === 404
+        ? (token ? 'Repository not found, or this token is not granted access to it. Confirm the fine-grained token includes this repository and Contents: Read-only.' : 'Repository not found or private. Add a fine-grained GitHub token with access to this repository and Contents: Read-only.')
+        : data.message || `GitHub returned HTTP ${response.status}.`;
+      throw new Error(detail);
+    }
+    return data;
+  };
+  try {
+    const meta = await getJson(api);
+    const branch = meta.default_branch || 'main';
+    const tree = await getJson(`${api}/git/trees/${encodeURIComponent(branch)}?recursive=1`);
+    if (tree.truncated) throw new Error('GitHub truncated this repository tree; try attaching a local folder or a smaller repository.');
+    const blobs = (tree.tree || []).filter((entry) => entry.type === 'blob');
+    const files = [{
+      path: 'REPO-TREE.txt',
+      text: `${meta.full_name} — ${meta.description || '(no description)'}\nBranch: ${branch} · ★ ${meta.stargazers_count || 0} · ${meta.language || '?'}\n\nRepository paths (sizes in bytes):\n\n` + blobs.slice(0, 400).map((entry) => `${entry.path}  (${entry.size || 0} B)`).join('\n'),
+    }];
+    const isKeyFile = (entryPath) => {
+      const base = entryPath.split('/').pop().toLowerCase();
+      return /^(readme|license|package\.json|pyproject\.toml|cargo\.toml|go\.mod|requirements\.txt|makefile|dockerfile)(\.|$)/i.test(base)
+        || /^(main|index|app)\.[a-z0-9]{1,4}$/i.test(base);
+    };
+    let budget = 48 * 1024;
+    for (const entry of blobs) {
+      if (!isKeyFile(entry.path) || budget <= 0 || (entry.size || 0) > 64 * 1024 || files.length >= 15) continue;
+      const blob = await getJson(`${api}/git/blobs/${encodeURIComponent(entry.sha)}`);
+      if (!blob.encoding || blob.encoding !== 'base64' || typeof blob.content !== 'string') continue;
+      const text = Buffer.from(blob.content.replace(/\s/g, ''), 'base64').toString('utf8');
+      const bytes = Buffer.byteLength(text, 'utf8');
+      if (bytes > budget) continue;
+      files.push({ path: entry.path, text });
+      budget -= bytes;
+    }
+    return { ok: true, repository: meta.full_name, isPrivate: !!meta.private, branch, files, fileCount: files.length, bytes: files.reduce((sum, file) => sum + Buffer.byteLength(file.text, 'utf8'), 0) };
+  } catch (error) {
+    return { ok: false, message: error.message || 'Could not fetch this GitHub repository.' };
+  }
+}
+
+// Pull OpenRouter's own explanation out of an error body so the user sees the real reason
+// instead of a generic guess.
+function apiDetail(body = '') {
+  try {
+    const j = JSON.parse(body);
+    const msg = j?.error?.message || j?.message || '';
+    if (msg) return ` OpenRouter said: “${String(msg).slice(0, 300)}”`;
+  } catch {}
+  return body ? ` ${String(body).slice(0, 200)}` : '';
+}
+
 function friendly(status, body = '') {
-  if (status === 401 || status === 403) return 'OpenRouter rejected your API key. Re-check it in Settings.';
-  if (status === 402) return 'Out of OpenRouter credits. Add a few dollars at openrouter.ai/credits.';
+  if (status === 401) return `OpenRouter rejected the API key (401).${apiDetail(body)} Paste the key again in Settings — if it still fails, create a new one at openrouter.ai/keys.`;
+  // 403 is NOT a bad key: it is a permission, verification, or moderation refusal, and saying
+  // "bad key" here sent people off re-pasting a perfectly good key.
+  if (status === 403) return `OpenRouter refused this request (403) — this is a permission, verification, or moderation refusal, not a wrong key.${apiDetail(body)}`;
+  if (status === 402) return `Out of OpenRouter credits (402). Add a few dollars at openrouter.ai/credits.${apiDetail(body)}`;
   if (status === 404) return "That model name wasn't found. Pick one from the list.";
-  if (status === 429) return 'Rate limited. Wait a moment and try again.';
+  if (status === 429) return 'Rate limited (429). Free ":free" models share a small per-minute and daily quota with everyone else, so they often refuse — wait 30–60s and retry, or set a fallback model in Settings so the volley can continue on another model.';
   return `Request failed (${status}). ${body.slice(0, 200)}`;
 }
 
 ipcMain.handle('key:has', () => !!loadKey());
+// Reported separately from key:has so a key file that exists but can no longer be
+// decrypted (new Windows profile, OS reinstall) is visible instead of silent.
+ipcMain.handle('key:state', () => {
+  const configured = !!loadKey();
+  let savedFileExists = false;
+  try { savedFileExists = fs.statSync(keyFile()).isFile(); } catch {}
+  return { configured, unreadable: !configured && savedFileExists, encrypted: safeStorage.isEncryptionAvailable(), path: keyFile(), error: lastKeyError };
+});
 ipcMain.handle('key:save', (_e, k) => { saveKey((k || '').trim()); return true; });
-ipcMain.handle('key:test', async (_e, k) => {
-  const key = (k || '').trim() || loadKey();
-  if (!key) return { ok: false, message: 'Paste your key first.' };
+ipcMain.handle('github:token:has', () => ({ configured: !!loadGithubToken(), secureStorage: safeStorage.isEncryptionAvailable() }));
+ipcMain.handle('github:token:set', async (_e, token) => {
+  const value = String(token || '').trim();
+  if (!value) return { ok: false, message: 'Paste a GitHub token first.' };
+  if (!/^github_pat_[A-Za-z0-9_]+$/.test(value)) return { ok: false, message: 'Use a GitHub fine-grained personal access token (it starts with github_pat_).' };
   try {
-    const r = await fetch(`${API}/auth/key`, { headers: { Authorization: `Bearer ${key}` } });
-    if (r.ok) return { ok: true, message: 'Key works!' };
-    return { ok: false, message: friendly(r.status) };
-  } catch { return { ok: false, message: "Can't reach OpenRouter. Check your internet." }; }
+    const response = await fetch('https://api.github.com/user', { headers: { Authorization: `Bearer ${value}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, message: response.status === 401 ? 'GitHub rejected that token. Check that it is active and has not expired.' : data.message || `GitHub returned HTTP ${response.status}.` };
+    const saved = saveGithubToken(value);
+    return { ok: true, username: data.login || '', persisted: saved.persisted };
+  } catch (error) {
+    return { ok: false, message: error.message || 'Could not validate the GitHub token.' };
+  }
+});
+ipcMain.handle('github:token:clear', () => { saveGithubToken(''); return true; });
+ipcMain.handle('github:repo:fetch', (_e, owner, repo) => fetchGithubRepository(String(owner || ''), String(repo || ''), loadGithubToken()));
+ipcMain.handle('key:test', async (_e, k) => {
+  const pasted = String(k || '').trim();
+  const key = pasted || loadKey();
+  if (!key) return { ok: false, message: 'Paste your key first.' };
+  const check = async (value) => {
+    try {
+      const r = await fetch(`${API}/auth/key`, { headers: { Authorization: `Bearer ${value}` } });
+      if (r.ok) return { ok: true, message: 'Key works!' };
+      return { ok: false, message: friendly(r.status, await r.text().catch(() => '')) };
+    } catch { return { ok: false, message: "Can't reach OpenRouter. Check your internet." }; }
+  };
+  const result = await check(key);
+  if (!result.ok || !pasted) return result;
+  // "Key works!" must mean the key this app will actually use works. Save it, then re-read it
+  // from disk and test that copy — a write/decrypt problem used to surface only mid-volley.
+  try { saveKey(pasted); } catch (e) {
+    return { ok: false, message: `OpenRouter accepts that key, but saving it on this PC failed: ${e.message || e}` };
+  }
+  const stored = loadKey();
+  if (!stored) return { ok: false, message: 'The key was written but could not be read back. Check that the app can write to its data folder, then try again.' };
+  const after = await check(stored);
+  if (!after.ok) return { ok: false, message: `OpenRouter accepts that key, but the copy saved on this PC fails: ${after.message}` };
+  return { ok: true, message: 'Key works! Saved and re-checked from disk.' };
+});
+ipcMain.handle('key:usage', async () => {
+  const key = loadKey();
+  if (!key) return { ok: false, message: 'No saved key.' };
+  const r = await fetch(`${API}/key`, { headers: { Authorization: `Bearer ${key}` } });
+  if (!r.ok) return { ok: false, message: friendly(r.status) };
+  const data = await r.json();
+  return { ok: true, data: data.data || data };
 });
 const CHEAP_PER_M_TOKENS = 2; // $2 per million tokens (prompt+completion combined) or cheaper
 
@@ -88,7 +238,7 @@ function modelSupportsVision(raw, id) {
   if (!m) return null;
   return !!m.architecture?.input_modalities?.includes?.('image');
 }
-ipcMain.handle('models:list', async () => {
+ipcMain.handle('models:list', async (_e, options = {}) => {
   const data = await getModelsRaw();
   const rows = data.map((m) => {
     const prompt = parseFloat(m.pricing?.prompt || '0') || 0;
@@ -96,11 +246,12 @@ ipcMain.handle('models:list', async () => {
     const perM = (prompt + completion) * 1e6;
     const isFree = perM === 0 || /:free$/i.test(m.id);
     const isStealth = /stealth|cloak/i.test(m.id) || /stealth|cloak/i.test(m.name || '');
-    return { id: m.id, perM, isFree, isStealth };
-  }).filter((m) => m.isFree || m.isStealth || m.perM <= CHEAP_PER_M_TOKENS);
+    return { id: m.id, perM, isFree, isStealth, vision: !!m.architecture?.input_modalities?.includes?.('image') };
+  }).filter((m) => options?.all || m.isFree || m.isStealth || m.perM <= CHEAP_PER_M_TOKENS);
   const rank = (m) => (m.isFree ? 0 : m.isStealth ? 1 : 2);
   rows.sort((a, b) => rank(a) - rank(b) || a.perM - b.perM || a.id.localeCompare(b.id));
-  return rows.map((m) => m.id);
+  // Rich rows (id + price + free/stealth/vision flags) so the UI can badge models, not just name them.
+  return rows;
 });
 ipcMain.handle('clipboard:write', (_e, t) => { clipboard.writeText(t); return true; });
 ipcMain.handle('folder:open', () => { fs.mkdirSync(runsDir(), { recursive: true }); shell.openPath(runsDir()); });
@@ -109,35 +260,88 @@ ipcMain.handle('window:maximize', () => { if (win.isMaximized()) win.unmaximize(
 ipcMain.handle('window:close', () => win.close());
 ipcMain.handle('runs:list', () => {
   fs.mkdirSync(runsDir(), { recursive: true });
-  return fs.readdirSync(runsDir()).filter(f => f.endsWith('-final.md')).map(f => {
-    const stamp = f.slice(0, -'-final.md'.length);
+  const items = fs.readdirSync(runsDir()).filter((f) => f.endsWith('-final.md') || f.endsWith('-draft.md')).map((f) => {
+    const isDraft = f.endsWith('-draft.md');
+    // -draft.md = a Stop with partial text: still listed in history, flagged as incomplete.
+    const stamp = f.slice(0, -(isDraft ? '-draft.md' : '-final.md').length);
     let title = '';
     try { title = fs.readFileSync(path.join(runsDir(), `${stamp}.title`), 'utf8').trim(); } catch {}
-    return { name: f, title, path: path.join(runsDir(), f) };
+    let meta = {};
+    try { meta = JSON.parse(fs.readFileSync(path.join(runsDir(), `${stamp}.meta.json`), 'utf8')); } catch {}
+    return { name: f, title, path: path.join(runsDir(), f), incomplete: isDraft, meta };
   }).sort((a,b)=>b.name.localeCompare(a.name));
+  return items;
 });
-ipcMain.handle('url:open', (_e, u) => { if (/^https:\/\//.test(u)) shell.openExternal(u); });
+ipcMain.handle('url:open', (_e, u) => {
+  if (typeof u === 'string' && (/^https:\/\//i.test(u) || /^(cursor|claude|vscode):\/\//i.test(u))) shell.openExternal(u);
+});
+// Loads a saved run's final prompt (plus the original idea) so the sidebar history is
+// clickable, not just a list of titles.
+ipcMain.handle('runs:update', (_e, name, patch) => {
+  const isDraft = typeof name === 'string' && name.endsWith('-draft.md');
+  if (typeof name !== 'string' || (!name.endsWith('-final.md') && !isDraft) || name.includes('/') || name.includes('\\') || name.includes('..')) return false;
+  const stamp = name.slice(0, -(isDraft ? '-draft.md' : '-final.md').length);
+  const safe = {};
+  if (patch && ['used', 'edited', 'failed', 'unused'].includes(patch.outcome)) safe.outcome = patch.outcome;
+  if (patch && typeof patch.project === 'string') safe.project = patch.project.slice(0, 80);
+  const file = path.join(runsDir(), `${stamp}.meta.json`);
+  let meta = {};
+  try { meta = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  Object.assign(meta, safe);
+  try { fs.writeFileSync(file, JSON.stringify(meta, null, 2)); return true; } catch { return false; }
+});
+ipcMain.handle('runs:read', (_e, name) => {
+  // Only exact expected file names of the expected shape, resolved inside runsDir().
+  const isDraft = typeof name === 'string' && name.endsWith('-draft.md');
+  if (typeof name !== 'string' || (!name.endsWith('-final.md') && !isDraft) || name.includes('/') || name.includes('\\') || name.includes('..')) return null;
+  let final = '';
+  try { final = fs.readFileSync(path.join(runsDir(), name), 'utf8'); } catch { return null; }
+  const stamp = name.slice(0, -(isDraft ? '-draft.md' : '-final.md').length);
+  let idea = '';
+  try {
+    idea = fs.readFileSync(path.join(runsDir(), `${stamp}.idea`), 'utf8');
+  } catch {
+    // Runs saved before idea sidecars existed logged the idea in the run log's `## Idea` section.
+    try {
+      const logTxt = fs.readFileSync(path.join(runsDir(), `${stamp}.md`), 'utf8');
+      const m = logTxt.match(/^## Idea\n\n([\s\S]*?)(?=\n## |$)/m);
+      if (m) idea = m[1];
+    } catch {}
+  }
+  let meta = {};
+  try { meta = JSON.parse(fs.readFileSync(path.join(runsDir(), `${stamp}.meta.json`), 'utf8')); } catch {}
+  let log = '';
+  try { log = fs.readFileSync(path.join(runsDir(), `${stamp}.md`), 'utf8'); } catch {}
+  return { final, idea, meta, log };
+});
 
 const IDLE_MS = 30000; // no bytes for this long means the stream stalled
+// Vision requests legitimately take far longer than text before the first byte (multi-MB
+// base64 payloads get uploaded/processed provider-side), so image-bearing calls wait wider.
+const IDLE_MS_HEAVY = 120000;
+const messagesHaveImages = (messages) => (messages || []).some((m) => Array.isArray(m.content) && m.content.some((c) => c && c.type === 'image_url'));
 
-async function stream(key, model, system, messages, signal, onDelta) {
+async function stream(key, model, system, messages, signal, onDelta, onUsage, onCtl) {
   // Own controller: an idle stall can cancel the request without pretending the user hit Stop,
   // and a user Stop still cancels the request through the run's signal.
   const ctl = new AbortController();
   let idle = null, stalled = false;
+  const idleLimit = messagesHaveImages(messages) ? IDLE_MS_HEAVY : IDLE_MS;
   const arm = () => {
     clearTimeout(idle);
-    idle = setTimeout(() => { stalled = true; ctl.abort(); }, IDLE_MS);
+    idle = setTimeout(() => { stalled = true; ctl.abort(); }, idleLimit);
   };
   const onStop = () => ctl.abort();
   if (signal) { if (signal.aborted) ctl.abort(); else signal.addEventListener('abort', onStop, { once: true }); }
-  const stall = () => new Error(`The model stopped responding (nothing for ${IDLE_MS / 1000}s). Try again or pick a different model.`);
+  // Lets the run swap models mid-flight: aborting just this request, not the whole volley.
+  if (onCtl) onCtl(() => ctl.abort());
+  const stall = () => new Error(`The model stopped responding (nothing for ${idleLimit / 1000}s). Try again or pick a different model.`);
 
   try {
     const req = () => fetch(`${API}/chat/completions`, {
       method: 'POST', signal: ctl.signal,
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'VolleyPrompt' },
-      body: JSON.stringify({ model, stream: true, messages: [{ role: 'system', content: system }, ...messages] }),
+      body: JSON.stringify({ model, stream: true, stream_options: { include_usage: true }, messages: [{ role: 'system', content: system }, ...messages] }),
     });
     let res;
     for (let attempt = 0; ; attempt++) {
@@ -153,7 +357,8 @@ async function stream(key, model, system, messages, signal, onDelta) {
     }
     if (!res.ok) throw new Error(friendly(res.status, await res.text().catch(() => '')));
     const dec = new TextDecoder();
-    let buf = '', text = '';
+    let buf = '', text = '', usage = null;
+    const startedAt = Date.now();
     arm();
     for await (const chunk of res.body) {
       arm();
@@ -167,11 +372,13 @@ async function stream(key, model, system, messages, signal, onDelta) {
         let j;
         try { j = JSON.parse(data); } catch { continue; }
         if (j.error) throw new Error(j.error.message || 'Model error');
+        if (j.usage) usage = j.usage;
         const d = j.choices?.[0]?.delta?.content;
         if (d) { text += d; onDelta(d); }
       }
     }
     if (!text.trim()) throw new Error('The model returned nothing. Try a different model.');
+    if (onUsage) onUsage({ ...(usage || {}), elapsedMs: Date.now() - startedAt });
     return text;
   } catch (e) {
     // A stall surfaces as an AbortError, so translate it into something the user can act on.
@@ -184,13 +391,17 @@ async function stream(key, model, system, messages, signal, onDelta) {
 }
 
 // ---- attachment handling (Phase 3: images/text; Phase 5: project folders) ----
-const MAX_ATTACH_TOTAL_BYTES = 20 * 1024 * 1024; // defense-in-depth; renderer enforces this before sending too
+// Desktop budget: the renderer pre-serializes attachments, so this is the per-run ceiling.
+// 64 MB decoded ≈ 85 MB base64 in the request — generous, but individual OpenRouter
+// providers may still reject very large requests themselves.
+const MAX_ATTACH_TOTAL_BYTES = 64 * 1024 * 1024;
 const extOf = (name) => { const i = name.lastIndexOf('.'); return i === -1 ? '' : name.slice(i).toLowerCase(); };
 
 function sniffImageMime(buf) {
   if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
   if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
   if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  if (buf.length >= 4 && buf.toString('ascii', 0, 4) === 'GIF8') return 'image/gif';
   return null;
 }
 
@@ -281,39 +492,144 @@ const verdictOf = (t) => {
   return m.length ? m[m.length - 1][1].toUpperCase() : 'REVISE';
 };
 
+ipcMain.handle('utility:call', async (_e, cfg) => {
+  const key = loadKey();
+  if (!key) throw new Error('No API key yet. Open Settings and paste it.');
+  const allowed = new Set(['testdrive', 'annotate', 'variant']);
+  if (!cfg || !allowed.has(cfg.kind) || typeof cfg.prompt !== 'string' || cfg.prompt.length > 200000) throw new Error('Invalid utility request.');
+  const model = String(cfg.model || '').slice(0, 200);
+  if (!model) throw new Error('Choose a model first.');
+  // Optional steer for a variant: e.g. "make it mobile-first, drop the audio". Capped so a
+  // pasted essay can't blow up the request.
+  const instruction = String(cfg.instruction || '').slice(0, 800).trim();
+  const userContent = cfg.kind === 'variant' && instruction
+    ? `${cfg.prompt}\n\nVARIANT INSTRUCTION FROM THE USER (apply it, keep the rest of the prompt coherent and complete):\n${instruction}`
+    : cfg.prompt;
+  const system = cfg.kind === 'testdrive'
+    ? 'You are a pragmatic software architect. Read this build prompt and return a concise, concrete build plan: the actual product, first implementation milestones, likely files/components, and any ambiguous requirement that could cause a wrong build. Do not implement it.'
+    : cfg.kind === 'annotate'
+      ? 'Explain the intent of each major section of the supplied prompt in concise inline annotations. Preserve the original section wording and add a one-line rationale after each section. Output only the annotated prompt.'
+      : 'Create a meaningfully different but equally viable alternative to the supplied prompt. Preserve the user goal and constraints. Output only the full alternative prompt.';
+  const startedAt = Date.now();
+  const res = await fetch(`${API}/chat/completions`, {
+    method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'VolleyPrompt' },
+    body: JSON.stringify({ model, stream: false, messages: [{ role: 'system', content: system }, { role: 'user', content: userContent }] }),
+  });
+  if (!res.ok) throw new Error(friendly(res.status, await res.text().catch(() => '')));
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) throw new Error('The model returned nothing. Try a different model.');
+  return { text, usage: data.usage || null, elapsedMs: Date.now() - startedAt };
+});
+
 ipcMain.handle('run:start', async (_e, cfg) => {
   if (current) return;
   const key = loadKey();
   const send = (ev) => win && !win.isDestroyed() && win.webContents.send('run:event', ev);
   if (!key) return send({ type: 'error', message: 'No API key yet. Open Settings and paste it.' });
-  const { idea, author, critic } = cfg;
+  const { idea } = cfg;
+  // Mutable for the whole run: the renderer can swap either model mid-volley (run:models),
+  // which applies to the next call — or, with retry, restarts the request in flight.
+  const runModels = { author: cfg.author, critic: cfg.critic };
   const rounds = Math.max(1, Math.min(8, cfg.rounds | 0 || 3));
 
   // Validate attachments and check vision support *before* taking the run lock, so a
   // rejected run doesn't leave the app stuck thinking a volley is in progress.
   const { images, textFiles, folders, rejected } = prepareAttachments(cfg.attachments);
   if (rejected.length) send({ type: 'notice', message: 'Skipped: ' + rejected.join(', ') });
+
+  // How the Reviewer receives images: 'full' (images attached), 'describe' (the Writer,
+  // which can see them, writes a text description instead), or 'none' (text only).
+  // cfg.imgMode: 'auto' (default) | 'full' | 'describe' | 'skip' — chosen in Settings.
+  let reviewImageMode = 'none';
   if (images.length) {
     const raw = await getModelsRaw();
-    for (const [label, id] of [['Writer', author], ['Reviewer', critic]]) {
-      const ok = modelSupportsVision(raw, id);
-      if (ok !== true) {
-        return send({
-          type: 'error',
-          message: `The ${label} model (${id}) ${ok === null ? "has unknown image support" : "doesn't support image inputs"}. Pick a vision-capable model, or remove the image attachments.`,
-        });
-      }
+    const writerVision = modelSupportsVision(raw, runModels.author);
+    if (writerVision !== true) {
+      return send({
+        type: 'error',
+        message: `The Writer model (${runModels.author}) ${writerVision === null ? "has unknown image support" : "doesn't support image inputs"}. Pick a vision-capable Writer, or remove the image attachments.`,
+      });
+    }
+    const criticVision = modelSupportsVision(raw, runModels.critic);
+    const mode = cfg.imgMode || 'auto';
+    if (mode === 'skip') {
+      reviewImageMode = 'none';
+    } else if (criticVision === true) {
+      // Reviewer can see: send the real images. Even when 'describe' was chosen, that pass
+      // would be pure extra cost with zero benefit.
+      if (mode === 'describe') send({ type: 'notice', message: 'Reviewer already supports vision — sending images directly (skips the description pass, saves cost).' });
+      reviewImageMode = 'full';
+    } else if (criticVision === false || mode === 'describe') {
+      reviewImageMode = 'describe';
+      send({ type: 'notice', message: criticVision === false && mode !== 'describe'
+        ? "Reviewer can't see images — the Writer will describe them to it (no vision Reviewer needed)."
+        : 'Writer will describe the images to the text-only Reviewer.' });
+    } else {
+      return send({
+        type: 'error',
+        message: `Unknown image support for the Reviewer model (${runModels.critic}). In Settings (⚙) set "Reviewer sees attachments" to Describe or Skip.`,
+      });
     }
   }
 
   const ctl = new AbortController();
-  current = { ctl, resolveNotes: null };
+  current = { ctl, resolveNotes: null, models: runModels, swapRequested: false, callAbort: null };
+  // Per-call fallback: when a model call fails (rate-limit, outage, …) and a fallback model
+  // is configured in Settings, that one call is retried once on the fallback model.
+  const fallbackModel = (cfg.fallback || '').trim();
+  const rubric = String(cfg.rubric || '').trim();
+  const criticSystem = rubric ? `${CRITIC_SYSTEM}\n\nADDITIONAL USER REVIEW RUBRIC (apply this too):\n${rubric}` : CRITIC_SYSTEM;
+  const budgetLimit = Math.max(0, Number(cfg.budget) || 0);
+  let actualCost = 0, usagePrompt = 0, usageCompletion = 0, budgetHit = false;
+  const modelRates = (id) => {
+    const m = modelsRawCache.data.find((x) => x.id === id);
+    return { prompt: (parseFloat(m?.pricing?.prompt || '0') || 0) * 1e6, completion: (parseFloat(m?.pricing?.completion || '0') || 0) * 1e6 };
+  };
+  const snapshots = [], metrics = [];
+  const callModel = async (role, r, system, messages, onDelta, swapRetries = 1) => {
+    const recordMetric = (usedModel, u) => {
+      const promptTokens = Number(u.prompt_tokens) || 0, completionTokens = Number(u.completion_tokens) || 0;
+      const rates = modelRates(usedModel);
+      const cost = u.cost == null ? (promptTokens * rates.prompt + completionTokens * rates.completion) / 1e6 : Number(u.cost);
+      actualCost += cost; usagePrompt += promptTokens; usageCompletion += completionTokens;
+      budgetHit = budgetLimit > 0 && actualCost >= budgetLimit;
+      const metric = { role, model: usedModel, elapsedMs: u.elapsedMs, promptTokens, completionTokens, cost, totalCost: actualCost, budgetHit, actual: promptTokens + completionTokens > 0 };
+      metrics.push(metric);
+      send({ type: 'metric', ...metric });
+      send({ type: 'usage', sent: usagePrompt, recv: usageCompletion, cost: actualCost, actual: promptTokens + completionTokens > 0 });
+    };
+    const panel = role === 'Writer' ? 'author' : 'critic';
+    const pick = () => (role === 'Writer' ? runModels.author : runModels.critic);
+    const model = pick();
+    try {
+      return await stream(key, model, system, messages, ctl.signal, onDelta, (u) => recordMetric(model, u),
+        (abort) => { if (current) current.callAbort = abort; });
+    } catch (e) {
+      if (ctl.signal.aborted) throw e;
+      // "Retry round with these models": the in-flight request was aborted on purpose, and the
+      // same call restarts on whatever model the user just picked.
+      if (current?.swapRequested && swapRetries > 0) {
+        current.swapRequested = false; current.callAbort = null;
+        send({ type: 'panel', role: panel, r });
+        send({ type: 'notice', message: `Restarted round ${r} with ${role} = ${pick()}.` });
+        send({ type: 'round', r, rounds, models: { ...runModels } });
+        return callModel(role, r, system, messages, onDelta, swapRetries - 1);
+      }
+      if (!fallbackModel || fallbackModel === model) throw e;
+      send({ type: 'notice', message: `${role} model ${model} failed (${e.message}) — retrying on fallback ${fallbackModel}.` });
+      send({ type: 'panel', role: panel, r }); // clear the partial panel for the retry
+      return stream(key, fallbackModel, system, messages, ctl.signal, onDelta, (u) => recordMetric(fallbackModel, u),
+        (abort) => { if (current) current.callAbort = abort; });
+    }
+  };
   const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
   fs.mkdirSync(runsDir(), { recursive: true });
   const logPath = path.join(runsDir(), `${stamp}.md`);
   const title = idea.trim().split('\n')[0].replace(/\s+/g, ' ').slice(0, 60);
   fs.writeFileSync(path.join(runsDir(), `${stamp}.title`), title);
-  const log = [`# VolleyPrompt ${stamp}\n`, `Author: ${author}  \nCritic: ${critic}\n`, `## Idea\n\n${idea}\n`];
+  fs.writeFileSync(path.join(runsDir(), `${stamp}.idea`), idea);
+  const log = [`# VolleyPrompt ${stamp}\n`, `Author: ${runModels.author}  \nCritic: ${runModels.critic}\n`, `## Idea\n\n${idea}\n`];
   if (images.length || textFiles.length || folders.length) {
     // Metadata only — never the base64/text payload itself — so saved runs stay small and private.
     const names = [
@@ -325,37 +641,95 @@ ipcMain.handle('run:start', async (_e, cfg) => {
   }
   // The same images/textFiles/folders are reused for every Writer round (via history) and
   // every Reviewer round (rebuilt per-round below) — nothing is dropped after round 1.
-  const history = [{ role: 'user', content: buildUserContent(`Write the prompt for this idea:\n\n${idea}`, images, textFiles, folders) }];
+  const firstAsk = `Write the prompt for this idea:\n\n${idea}`
+    + (cfg.context ? `\n\n--- For reference: my previously finished prompts (match their format/quality; don't just repeat them) ---\n${cfg.context}` : '');
+  const history = [{ role: 'user', content: buildUserContent(firstAsk, images, textFiles, folders) }];
+
+  // Rough token/cost estimate for the status line (text chars ÷ 4; image bytes excluded —
+  // they'd need the real tokenizer, and FREE vs paid visibility is the point, not precision).
+  let sentChars = 0, recvChars = 0, draftSaved = false;
+  const attachTextLen = textFiles.reduce((s, f) => s + f.text.length, 0)
+    + folders.reduce((s, fo) => s + fo.files.reduce((x, f) => x + f.text.length, 0), 0);
+  // The Writer (which can see the attachments) describes them once, up front, when the
+  // Reviewer is text-only — one extra call per run, cheaper than requiring a vision Reviewer.
+  let imageDescription = '';
+  if (reviewImageMode === 'describe') {
+    imageDescription = await callModel('Writer', 0, IMAGE_DESCRIPTION_SYSTEM,
+      [{ role: 'user', content: buildUserContent('Describe the attached images for a text-only reviewer. For each, state what it shows and which product feature or UX moment it demonstrates. Output ONLY the descriptions.', images, [], []) }],
+      () => {});
+    recvChars += imageDescription.length;
+  }
+
   let draft = '', finalSaved = false;
+  const persistRunMeta = (extra = {}) => {
+    try { fs.writeFileSync(path.join(runsDir(), `${stamp}.meta.json`), JSON.stringify({ project: cfg.project || '', snapshots, metrics, cost: actualCost, tokens: usagePrompt + usageCompletion, score: snapshots.at(-1)?.score ?? null, rubric: cfg.rubric || '', modelPair: { ...runModels }, ...extra }, null, 2)); } catch {}
+  };
+  persistRunMeta(); // includes usage from an optional image-description pass
+  // A Stop with partial text still lands on disk, flagged as a stopped draft (-draft.md).
+  const saveAbortDraft = () => {
+    try { fs.writeFileSync(path.join(runsDir(), `${stamp}-draft.md`), draft); return true; }
+    catch { return false; }
+  };
   try {
     for (let r = 1; r <= rounds; r++) {
-      send({ type: 'round', r, rounds });
+      send({ type: 'round', r, rounds, models: { ...runModels } });
       send({ type: 'panel', role: 'author', r });
-      draft = await stream(key, author, AUTHOR_SYSTEM, history, ctl.signal, (d) => send({ type: 'delta', role: 'author', text: d }));
+      const oldDraft = draft;
+      if (r === 1) sentChars += firstAsk.length + attachTextLen;
+      draft = await callModel('Writer', r, AUTHOR_SYSTEM, history, (d) => send({ type: 'delta', role: 'author', text: d }));
+      recvChars += draft.length;
       history.push({ role: 'assistant', content: draft });
+      // Don't spend on a Reviewer call after the Writer response has crossed the run cap.
+      if (budgetHit) {
+        send({ type: 'budget-hit', cost: actualCost, limit: budgetLimit });
+        const snap = { round: r, draft, review: 'Budget reached before review.', score: null, verdict: 'BUDGET' };
+        snapshots.push(snap); persistRunMeta({ score: snapshots.at(-1)?.score ?? null });
+        send({ type: 'round-snapshot', ...snap });
+        break;
+      }
+      // Round 2+: show what changed as a diff instead of silently rewriting the panel.
+      if (r > 1 && oldDraft.trim()) send({ type: 'diff', oldText: oldDraft, newText: draft });
 
       send({ type: 'panel', role: 'critic', r });
-      const criticContent = buildUserContent(`Original idea:\n${idea}\n\nPrompt to review:\n\n${draft}`, images, textFiles, folders);
-      const review = await stream(key, critic, CRITIC_SYSTEM,
+      const criticText = reviewImageMode === 'describe'
+        ? `Original idea:\n${idea}\n\nImage descriptions (written by the Writer, which can view the attachments):\n${imageDescription}\n\nPrompt to review:\n\n${draft}`
+        : `Original idea:\n${idea}\n\nPrompt to review:\n\n${draft}`;
+      const criticContent = buildUserContent(criticText, reviewImageMode === 'full' ? images : [], textFiles, folders);
+      const review = await callModel('Reviewer', r, criticSystem,
         [{ role: 'user', content: criticContent }],
-        ctl.signal, (d) => send({ type: 'delta', role: 'critic', text: d }));
+        (d) => send({ type: 'delta', role: 'critic', text: d }));
       log.push(`## Round ${r}\n`, `### Draft\n\n${draft}\n`, `### Review\n\n${review}\n`);
       fs.writeFileSync(logPath, log.join('\n'));
 
+      sentChars += criticText.length;
+      recvChars += review.length;
       const verdict = verdictOf(review);
-      send({ type: 'verdict', verdict });
-      if (verdict === 'APPROVE' || r === rounds) break;
+      const scoreMatch = review.match(/FITNESS SCORE:\s*(\d{1,3})\s*\/\s*100/i);
+      const score = scoreMatch ? Math.max(0, Math.min(100, Number(scoreMatch[1]))) : null;
+      const issues = review.split(/\r?\n/).filter((line) => /\b(HIGH|MED|MEDIUM|LOW)\b/i.test(line) && /[-*\d.)]/.test(line)).slice(0, 20);
+      snapshots.push({ round: r, draft, review, score, verdict });
+      persistRunMeta({ score });
+      send({ type: 'round-snapshot', round: r, draft, review, score, verdict });
+      send({ type: 'review-ready', round: r, issues, score, verdict });
+      send({ type: 'verdict', verdict, score });
+      send({ type: 'usage', sent: usagePrompt || Math.round(sentChars / 4), recv: usageCompletion || Math.round(recvChars / 4), cost: actualCost, actual: usagePrompt + usageCompletion > 0 });
+      if (budgetHit) send({ type: 'budget-hit', cost: actualCost, limit: budgetLimit });
+      if (verdict === 'APPROVE' || r === rounds || budgetHit) break;
 
-      let notes = '';
+      let notes = '', selectedIssues = null;
       if (!cfg.auto) {
         send({ type: 'await-notes' });
         const reply = await new Promise((res) => { current.resolveNotes = res; });
         if (reply === null) break; // user chose "finish here"
-        notes = reply.trim();
+        selectedIssues = typeof reply === 'object' && Array.isArray(reply.selectedIssues) ? reply.selectedIssues : null;
+        notes = (typeof reply === 'string' ? reply : String(reply.notes || '')).trim();
       }
-      let follow = `Critic feedback:\n\n${review}\n\n`;
+      let follow = selectedIssues
+        ? `Reviewer feedback (address only the selected issues; leave unchecked issues unchanged):\n${selectedIssues.map((x) => `- ${x}`).join('\n')}\n\n`
+        : `Critic feedback:\n\n${review}\n\n`;
       if (notes) follow += `My own notes (these take priority):\n${notes}\n\n`;
       follow += 'Revise the prompt. Output ONLY the full revised prompt.';
+      sentChars += follow.length;
       history.push({ role: 'user', content: follow });
       log.push(`### Your notes\n\n${notes || '(none)'}\n`);
     }
@@ -363,24 +737,46 @@ ipcMain.handle('run:start', async (_e, cfg) => {
     // identical to "Finish here" unless we check the abort signal — without this check, hitting
     // Stop while paused between rounds silently saved and approved the draft instead of stopping.
     if (ctl.signal.aborted) {
-      send({ type: 'done', final: draft, file: '', stopped: true });
+      draftSaved = draft.trim() ? saveAbortDraft() : false;
+      persistRunMeta({ incomplete: true });
+      send({ type: 'done', final: draft, file: '', historyName: draftSaved ? `${stamp}-draft.md` : '', stopped: true, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
     } else {
       const finalPath = path.join(runsDir(), `${stamp}-final.md`);
       fs.writeFileSync(finalPath, draft);
+      persistRunMeta({ final: true });
       finalSaved = true;
       log.push('## Final prompt\n', draft);
       fs.writeFileSync(logPath, log.join('\n'));
-      send({ type: 'done', final: draft, file: finalPath });
+      send({ type: 'done', final: draft, file: finalPath, historyName: `${stamp}-final.md`, idea, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
     }
   } catch (e) {
-    if (ctl.signal.aborted) send({ type: 'done', final: draft, file: '', stopped: true });
-    else send({ type: 'error', message: e.message || String(e), partial: draft });
+    if (ctl.signal.aborted) {
+      draftSaved = draftSaved || (draft.trim() ? saveAbortDraft() : false);
+      send({ type: 'done', final: draft, file: '', historyName: draftSaved ? `${stamp}-draft.md` : '', stopped: true, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
+    }
+    else send({ type: 'error', message: e.message || String(e), partial: draft, idea });
   } finally {
     current = null;
     // No -final.md means runs:list will never surface this run, so its .title sidecar is dead weight.
-    if (!finalSaved) { try { fs.unlinkSync(path.join(runsDir(), `${stamp}.title`)); } catch {} }
+    if (!finalSaved && !draftSaved) {
+      try { fs.unlinkSync(path.join(runsDir(), `${stamp}.title`)); } catch {}
+      try { fs.unlinkSync(path.join(runsDir(), `${stamp}.idea`)); } catch {}
+    }
   }
 });
 
 ipcMain.handle('run:notes', (_e, notes) => { current?.resolveNotes?.(notes); });
+// Swap the Writer and/or Reviewer for the rest of a live volley. `retry: true` also aborts the
+// request in flight so a stalled round restarts on the new model instead of waiting it out.
+ipcMain.handle('run:models', (_e, next) => {
+  if (!current?.models) return { ok: false, message: 'No volley is running.' };
+  const clean = (v) => String(v || '').trim().slice(0, 200);
+  const author = clean(next?.author), critic = clean(next?.critic);
+  if (!author && !critic) return { ok: false, message: 'Pick a model first.' };
+  if (author) current.models.author = author;
+  if (critic) current.models.critic = critic;
+  const retry = !!next?.retry;
+  if (retry) { current.swapRequested = true; current.callAbort?.(); }
+  return { ok: true, retry, models: { ...current.models } };
+});
 ipcMain.handle('run:stop', () => { if (current) { current.ctl.abort(); current.resolveNotes?.(null); } });

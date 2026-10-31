@@ -25,8 +25,7 @@ Pick a **Writer AI** and a **Reviewer AI**. The Writer drafts your prompt, the R
 
 - **Images & screenshots** — drop one in, vision-capable models see it directly.
 - **Project folders** — attach a folder and pick exactly which files go in with a checkbox tree; junk (`node_modules`, `.git`, `.env`, lockfiles) is filtered automatically.
-- **Voice input** — dictate your idea straight into the editor.
-- **Live theming** — retune the neon accent colors from the titlebar.
+- **Live theming** — retune the whole palette from the titlebar: accents, borders, panels, fields and the animated backdrop all follow the hue/saturation/contrast sliders.
 - **OpenRouter-powered** — any model from OpenAI, Anthropic, Google, DeepSeek, etc., filtered to free/cheap by default.
 
 ## Getting started
