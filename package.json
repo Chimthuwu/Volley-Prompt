@@ -8,6 +8,7 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
+    "test": "node tests/smoke.test.js",
     "icons": "node scripts/make-icons.mjs",
     "dist": "npm run icons && electron-builder --win --publish never",
     "site:dev": "wrangler dev",
@@ -38,6 +39,7 @@
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
+    "jsdom": "^25.0.0",
     "png-to-ico": "^2.1.8",
     "sharp": "^0.33.5",
     "wrangler": "^4.0.0"
