@@ -772,3 +772,209 @@ a:hover { text-decoration: underline; text-shadow: 0 0 10px rgba(0, 240, 255, 0.
 main { flex:1; overflow:auto; padding:24px; max-width:none; margin:0; display:flex; flex-direction:column; justify-content:center; }
 
 #bgCanvas { position:fixed; inset:0; z-index:-2; pointer-events:none; }
+
+
+/* ============================================================
+   Provider Management UI
+   ============================================================ */
+
+.settings-card {
+  width: min(720px, 94vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 4px;
+}
+
+.tab-btn {
+  background: transparent;
+  border: 0;
+  color: var(--dim);
+  padding: 8px 14px;
+  border-radius: 8px 8px 0 0;
+  font: 600 12px/1 var(--font-display);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: 0.25s;
+}
+
+.tab-btn:hover {
+  color: var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.08);
+}
+
+.tab-btn.active {
+  color: var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.15);
+  box-shadow: 0 0 12px -4px var(--neon-cyan);
+}
+
+.tab-panel {
+  flex: 1;
+  overflow: auto;
+}
+
+.provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.provider-card {
+  background: rgba(18, 13, 38, 0.8);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.provider-card.connected {
+  border-color: var(--neon-green);
+  box-shadow: 0 0 20px -8px var(--neon-green);
+}
+
+.provider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.provider-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.provider-info strong {
+  font: 600 14px/1 var(--font-display);
+  letter-spacing: 1px;
+}
+
+.cli-badge {
+  background: rgba(255, 42, 109, 0.15);
+  border: 1px solid var(--neon-magenta);
+  color: var(--neon-magenta);
+  font: 500 10px/1 var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.provider-status {
+  font: 500 12px/1 var(--font-mono);
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.provider-status.connected {
+  background: rgba(5, 255, 161, 0.15);
+  color: var(--neon-green);
+}
+
+.provider-status.disconnected {
+  background: rgba(255, 42, 109, 0.15);
+  color: var(--neon-magenta);
+}
+
+.provider-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.auth-type { font-weight: 600; }
+.auth-method { color: var(--neon-cyan); }
+.auth-user { color: var(--txt); }
+
+.provider-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cred-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.cred-inputs input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.provider-model-select {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider-model-select .provider-select {
+  font: 500 11px/1 var(--font-display);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  background: rgba(7, 5, 15, 0.7);
+  color: var(--txt);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.provider-model-select .provider-select:focus {
+  outline: none;
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+}
+
+.provider-model-select input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.row .provider-model-select {
+  flex: 1;
+  min-width: 200px;
+}
+
+/* Provider model list indicators */
+#authorModelList option, #criticModelList option {
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 600px) {
+  .provider-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .provider-actions {
+    width: 100%;
+  }
+  
+  .provider-actions .big,
+  .provider-actions .ghost {
+    flex: 1;
+    text-align: center;
+  }
+}

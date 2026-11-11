@@ -5,14 +5,12 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
 };
 
-
 function toast(msg, ms = 6000) {
   const t = $('toast'); t.textContent = msg; show('toast');
   clearTimeout(toast.t); toast.t = setTimeout(() => show('toast', false), ms);
 }
 
-// ---- Collapsible sidebar — applied immediately (before the async model fetch below)
-// so a remembered collapsed state doesn't flash open on load. ----
+// ---- Collapsible sidebar ----
 const sidebarEl = document.querySelector('.sidebar');
 function setSidebarCollapsed(collapsed) {
   sidebarEl.classList.toggle('sidebar-collapsed', collapsed);
@@ -22,9 +20,7 @@ function setSidebarCollapsed(collapsed) {
 setSidebarCollapsed(store.get('sidebarCollapsed', '0') === '1');
 $('btnSidebarToggle').onclick = () => setSidebarCollapsed(!sidebarEl.classList.contains('sidebar-collapsed'));
 
-// ---- Theme (hue/saturation/contrast) — shifts the actual accent CSS vars via HSL math,
-// so body text stays crisp and only the neon palette moves. Applied immediately to avoid
-// a flash of the default palette before the user's saved preference kicks in. ----
+// ---- Theme (hue/saturation/contrast) ----
 const THEME_BASE_HSL = {
   '--neon-cyan': [183, 100, 50],
   '--neon-magenta': [344, 100, 59],
@@ -39,8 +35,6 @@ function applyTheme({ hue, sat, contrast }) {
     const newL = Math.min(100, Math.max(0, 50 + (l - 50) * (contrast / 100)));
     root.setProperty(name, `hsl(${newH.toFixed(0)}, ${newS.toFixed(0)}%, ${newL.toFixed(0)}%)`);
   }
-  // Keep the purple-tinted borders/glow in step with the shifted purple instead of
-  // staying frozen at the original hue.
   const [ph, ps] = THEME_BASE_HSL['--neon-purple'];
   const h2 = ((ph + hue) % 360 + 360) % 360;
   const s2 = Math.min(100, Math.max(0, ps * (sat / 100)));
@@ -73,26 +67,304 @@ themePanel.addEventListener('click', (e) => e.stopPropagation());
 document.addEventListener('click', (e) => { if (!themePanel.classList.contains('hidden') && e.target !== themeBtn) closeThemePanel(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !themePanel.classList.contains('hidden')) closeThemePanel(); });
 
+// ============================================================================
+// PROVIDER MANAGEMENT
+// ============================================================================
+let providersData = [];
+let providersStatus = {};
+
+async function loadProviders() {
+  providersData = await pv.providersList();
+  await refreshProvidersStatus();
+  renderProviderList();
+  populateProviderSelects();
+}
+
+async function refreshProvidersStatus() {
+  providersStatus = await pv.providersStatus();
+}
+
+function renderProviderList() {
+  const container = $('providerList');
+  container.innerHTML = '';
+  
+  for (const p of providersData) {
+    const status = providersStatus[p.id] || { connected: false };
+    const card = document.createElement('div');
+    card.className = 'provider-card' + (status.connected ? ' connected' : '');
+    card.innerHTML = `
+      <div class="provider-header">
+        <div class="provider-info">
+          <strong>${p.name}</strong>
+          ${p.requiresExternalCli ? '<span class="cli-badge">CLI</span>' : ''}
+        </div>
+        <span class="provider-status ${status.connected ? 'connected' : 'disconnected'}">
+          ${status.connected ? '🟢 Connected' : '🔴 Disconnected'}
+        </span>
+      </div>
+      <div class="provider-details">
+        <span class="auth-type">${getAuthTypeLabel(p.authType)}</span>
+        ${status.authMethod ? `<span class="auth-method">${status.authMethod}</span>` : ''}
+        ${status.user ? `<span class="auth-user">${status.user}</span>` : ''}
+      </div>
+      <div class="provider-actions">
+        ${status.connected 
+          ? `<button class="ghost btn-disconnect" data-id="${p.id}">Disconnect</button>`
+          : `<button class="big btn-connect" data-id="${p.id}">${p.requiresExternalCli ? 'Connect via CLI' : 'Add API Key'}</button>`
+        }
+        ${p.authType === 'api_key' && !status.connected ? `
+          <div class="cred-inputs hidden" id="creds-${p.id}">
+            <input type="password" placeholder="API Key" id="key-${p.id}" spellcheck="false">
+            <span class="msg" id="msg-${p.id}"></span>
+            <div class="row">
+              <button class="big btn-save-creds" data-id="${p.id}">Save</button>
+              <button class="ghost btn-cancel-creds" data-id="${p.id}">Cancel</button>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+    container.appendChild(card);
+  }
+  
+  // Attach event listeners
+  container.querySelectorAll('.btn-connect').forEach(btn => {
+    btn.onclick = () => handleConnect(btn.dataset.id);
+  });
+  container.querySelectorAll('.btn-disconnect').forEach(btn => {
+    btn.onclick = () => handleDisconnect(btn.dataset.id);
+  });
+  container.querySelectorAll('.btn-save-creds').forEach(btn => {
+    btn.onclick = () => handleSaveCreds(btn.dataset.id);
+  });
+  container.querySelectorAll('.btn-cancel-creds').forEach(btn => {
+    btn.onclick = () => cancelCreds(btn.dataset.id);
+  });
+}
+
+function getAuthTypeLabel(type) {
+  const labels = {
+    api_key: 'API Key',
+    oauth: 'OAuth (via official CLI)',
+    local: 'Local (no auth)',
+    none: 'No auth required',
+  };
+  return labels[type] || type;
+}
+
+async function handleConnect(providerId) {
+  const provider = providersData.find(p => p.id === providerId);
+  if (!provider) return;
+  
+  if (provider.authType === 'api_key') {
+    // Show credential inputs
+    $(`creds-${providerId}`).classList.remove('hidden');
+    $(`key-${providerId}`).focus();
+  } else if (provider.requiresExternalCli) {
+    // CLI-based auth - just trigger connect
+    const btn = document.querySelector(`.btn-connect[data-id="${providerId}"]`);
+    btn.disabled = true;
+    btn.textContent = 'Connecting…';
+    const result = await pv.providerConnect(providerId);
+    btn.disabled = false;
+    if (result.success) {
+      toast(`✅ ${result.message}`, 4000);
+      await refreshProvidersStatus();
+      renderProviderList();
+      populateProviderSelects();
+    } else {
+      toast(`❌ ${result.message}`, 6000);
+      btn.textContent = 'Connect via CLI';
+    }
+  }
+}
+
+function cancelCreds(providerId) {
+  $(`creds-${providerId}`).classList.add('hidden');
+  $(`key-${providerId}`).value = '';
+  $(`msg-${providerId}`).textContent = '';
+}
+
+async function handleSaveCreds(providerId) {
+  const key = $(`key-${providerId}`).value.trim();
+  const msgEl = $(`msg-${providerId}`);
+  const btn = document.querySelector(`.btn-save-creds[data-id="${providerId}"]`);
+  
+  if (!key) {
+    msgEl.className = 'msg bad';
+    msgEl.textContent = 'Enter your API key.';
+    return;
+  }
+  
+  btn.disabled = true;
+  btn.textContent = 'Testing…';
+  msgEl.className = 'msg';
+  msgEl.textContent = 'Testing key…';
+  
+  const test = await pv.providerTestKey(providerId, key);
+  if (!test.ok) {
+    msgEl.className = 'msg bad';
+    msgEl.textContent = test.message;
+    btn.disabled = false;
+    btn.textContent = 'Save';
+    return;
+  }
+  
+  msgEl.className = 'msg ok';
+  msgEl.textContent = test.message;
+  
+  const save = await pv.providerSaveCreds(providerId, { apiKey: key, label: providersData.find(p => p.id === providerId)?.name });
+  if (save.success) {
+    toast('✅ Key saved', 3000);
+    $(`creds-${providerId}`).classList.add('hidden');
+    $(`key-${providerId}`).value = '';
+    await refreshProvidersStatus();
+    renderProviderList();
+    populateProviderSelects();
+  } else {
+    msgEl.className = 'msg bad';
+    msgEl.textContent = save.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Save';
+}
+
+async function handleDisconnect(providerId) {
+  const result = await pv.providerDisconnect(providerId);
+  if (result.success) {
+    toast('Disconnected', 3000);
+    await refreshProvidersStatus();
+    renderProviderList();
+    populateProviderSelects();
+  } else {
+    toast('Failed to disconnect', 4000);
+  }
+}
+
+function populateProviderSelects() {
+  const authorSelect = $('authorProvider');
+  const criticSelect = $('criticProvider');
+  
+  // Build options from connected providers
+  const connectedProviders = providersData.filter(p => providersStatus[p.id]?.connected);
+  
+  // If no providers connected, fall back to OpenRouter if it has a key
+  const hasOpenRouterKey = providersStatus.openrouter?.connected;
+  
+  let options = '';
+  for (const p of connectedProviders) {
+    options += `<option value="${p.id}">${p.name}</option>`;
+  }
+  
+  // Add OpenRouter as fallback if it has a key saved (even if not "connected" in status)
+  if (!connectedProviders.some(p => p.id === 'openrouter') && hasOpenRouterKey) {
+    options = `<option value="openrouter">OpenRouter</option>` + options;
+  }
+  
+  // If still no options, show all providers (will error on start if not connected)
+  if (!options) {
+    for (const p of providersData) {
+      options += `<option value="${p.id}">${p.name}</option>`;
+    }
+  }
+  
+  authorSelect.innerHTML = options;
+  criticSelect.innerHTML = options;
+  
+  // Restore saved selections or default
+  const savedAuthorProvider = store.get('authorProvider', 'openrouter');
+  const savedCriticProvider = store.get('criticProvider', 'openrouter');
+  authorSelect.value = connectedProviders.some(p => p.id === savedAuthorProvider) ? savedAuthorProvider : (connectedProviders[0]?.id || 'openrouter');
+  criticSelect.value = connectedProviders.some(p => p.id === savedCriticProvider) ? savedCriticProvider : (connectedProviders[1]?.id || connectedProviders[0]?.id || 'openrouter');
+  
+  // Load models for selected providers
+  loadModelsForProvider(authorSelect.value, 'author');
+  loadModelsForProvider(criticSelect.value, 'critic');
+  
+  // Attach change handlers
+  authorSelect.onchange = () => {
+    store.set('authorProvider', authorSelect.value);
+    loadModelsForProvider(authorSelect.value, 'author');
+  };
+  criticSelect.onchange = () => {
+    store.set('criticProvider', criticSelect.value);
+    loadModelsForProvider(criticSelect.value, 'critic');
+  };
+}
+
+async function loadModelsForProvider(providerId, role) {
+  const input = $(role === 'author' ? 'author' : 'critic');
+  const datalist = $(role === 'author' ? 'authorModelList' : 'criticModelList');
+  
+  input.placeholder = 'Loading models…';
+  input.disabled = true;
+  
+  const models = await pv.providerModels(providerId);
+  
+  datalist.innerHTML = models.map(m => `<option value="${m.id}">${m.name || m.id}${m.isFree ? ' (free)' : ''}${m.supportsVision ? ' 👁' : ''}</option>`).join('');
+  
+  // Restore saved model or pick first free/vision-capable
+  const savedModel = store.get(role === 'author' ? 'author' : 'critic');
+  const validModels = models.map(m => m.id);
+  if (validModels.includes(savedModel)) {
+    input.value = savedModel;
+  } else if (models.length) {
+    // Prefer free models, then vision-capable
+    const freeModel = models.find(m => m.isFree);
+    const visionModel = models.find(m => m.supportsVision);
+    input.value = freeModel?.id || visionModel?.id || models[0].id;
+  }
+  
+  input.placeholder = 'Select a model';
+  input.disabled = false;
+}
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
 (async () => {
-  $('author').value = store.get('author', 'deepseek/deepseek-chat-v3.1:free');
-  $('critic').value = store.get('critic', 'meta-llama/llama-3.3-70b-instruct:free');
+  // Load saved values
   $('rounds').value = store.get('rounds', '3');
   $('idea').value = store.get('idea', '');
   $('auto').checked = store.get('auto', '0') === '1';
-  if (!(await pv.hasKey())) openModal(true);
-  const ids = await pv.models();
-  $('modelList').innerHTML = ids.map((m) => `<option value="${m}">`).join('');
+  
+  // Load providers
+  await loadProviders();
+  
+  // Check if any provider is connected
+  const anyConnected = Object.values(providersStatus).some(s => s.connected);
+  if (!anyConnected) openModal(true);
+  
+  // Legacy model list for backward compat (OpenRouter) - REMOVED: now using provider-specific model lists
 })();
 
 function openModal(first) {
   $('modalTitle').textContent = first ? 'Welcome! One-time setup' : 'Settings';
-  $('keyMsg').textContent = ''; $('keyInput').value = '';
-  show('modal'); $('keyInput').focus();
+  show('modal');
+  
+  // Show providers tab by default
+  switchTab('providers');
+  
+  // Clear legacy key input
+  $('keyMsg').textContent = '';
+  $('keyInput').value = '';
 }
+
+// Tab switching
+function switchTab(tabId) {
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tabId));
+  document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.toggle('hidden', panel.id !== `tab${tabId.charAt(0).toUpperCase() + tabId.slice(1)}`));
+}
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.onclick = () => switchTab(btn.dataset.tab);
+});
+
 $('btnSettings').onclick = () => openModal(false);
 $('btnCloseModal').onclick = () => show('modal', false);
 $('btnFolder').onclick = () => pv.openFolder();
 document.querySelectorAll('[data-url]').forEach((a) => a.onclick = (e) => { e.preventDefault(); pv.openUrl(a.dataset.url); });
+
+// Legacy OpenRouter key save
 $('btnSaveKey').onclick = async () => {
   const k = $('keyInput').value.trim(), msg = $('keyMsg');
   if (!k) { msg.className = 'msg bad'; msg.textContent = 'Paste your key first.'; return; }
@@ -106,10 +378,25 @@ let runAbandoned = false;
 $('btnStart').onclick = async () => {
   const idea = $('idea').value.trim();
   if (!idea) { toast('Type your idea first 🙂'); $('idea').focus(); return; }
-  if (!(await pv.hasKey())) { openModal(true); return; }
-  const cfg = { idea, author: $('author').value.trim(), critic: $('critic').value.trim(), rounds: +$('rounds').value || 3, auto: $('auto').checked };
+  
+  // Check if at least one provider is connected
+  const anyConnected = Object.values(providersStatus).some(s => s.connected);
+  if (!anyConnected) { openModal(true); return; }
+  
+  const cfg = {
+    idea,
+    author: $('author').value.trim(),
+    critic: $('critic').value.trim(),
+    authorProvider: $('authorProvider').value,
+    criticProvider: $('criticProvider').value,
+    rounds: +$('rounds').value || 3,
+    auto: $('auto').checked
+  };
+  
   if (!cfg.author || !cfg.critic) { toast('Pick a model for both AIs.'); return; }
-  for (const k of ['author', 'critic', 'rounds', 'idea']) store.set(k, cfg[k]);
+  if (!cfg.authorProvider || !cfg.criticProvider) { toast('Select a provider for both AIs.'); return; }
+  
+  for (const k of ['author', 'critic', 'rounds', 'idea', 'authorProvider', 'criticProvider']) store.set(k, cfg[k]);
   store.set('auto', cfg.auto ? '1' : '0');
 
   if (pendingAttachments.length || pendingFolders.some((f) => f.status === 'ready')) {
@@ -133,14 +420,6 @@ $('btnStart').onclick = async () => {
   $('statusText').textContent = 'Starting…';
   pv.start(cfg);
 };
-$('btnStop').onclick = () => pv.stop();
-$('btnContinue').onclick = () => { const n = $('notes').value; $('notes').value = ''; show('notesBox', false); pv.sendNotes(n); };
-$('btnFinish').onclick = () => { show('notesBox', false); pv.sendNotes(null); };
-$('btnCopy').onclick = async () => { await pv.copy($('final').value); toast('Copied! Paste it into your coding AI.', 3000); };
-$('btnBack').onclick = () => { show('result', false); show('run', false); show('setup'); $('idea').focus(); };
-document.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => { await pv.copy($(b.dataset.copy).textContent); toast('Copied!', 1500); });
-document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.key === 'Enter' && !$('setup').classList.contains('hidden')) $('btnStart').click(); });
-$('btnAgain').onclick = () => { show('result', false); show('run', false); show('setup'); };
 
 // ---- Attachment UI shell (Phase 2 — local-only, not wired into pv.start) ----
 const ALLOWED_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.pdf', '.txt', '.md', '.markdown', '.json', '.csv', '.js', '.jsx', '.ts', '.tsx', '.py', '.html', '.htm', '.css']);
@@ -196,9 +475,9 @@ function renderAttachments() {
     const name = document.createElement('span');
     name.className = 'chip-name'; name.title = f.name; name.textContent = f.name;
     const size = document.createElement('span');
-    size.className = 'chip-size';
-    size.textContent = f.status === 'processing' ? `Reading… (${f.files.length}/${f.fileCount})` : `${f.fileCount} file${f.fileCount === 1 ? '' : 's'}`;
-    info.append(name, size);
+        size.className = 'chip-size';
+        size.textContent = f.status === 'processing' ? `Reading… (${f.files.length}/${f.fileCount})` : `${f.fileCount} file${f.fileCount === 1 ? '' : 's'}`;
+        info.append(name, size);
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button'; removeBtn.className = 'chip-remove'; removeBtn.title = 'Remove';
@@ -252,8 +531,6 @@ function renderAttachments() {
 const IGNORED_DIR_NAMES = new Set(['.git', 'node_modules', 'dist', 'build', '.next', '.nuxt', 'coverage', 'vendor', 'venv', '.venv', '__pycache__', '.idea', '.vscode']);
 const IGNORED_FILE_NAMES = new Set(['.DS_Store', 'Thumbs.db', '.env', '.env.local', '.env.production']);
 const IGNORED_FILE_PATTERNS = [/^\.env(\..+)?$/i, /\.lock$/i, /^package-lock\.json$/i, /^yarn\.lock$/i, /^pnpm-lock\.yaml$/i, /\.map$/i, /\.min\.(js|css)$/i, /\.(pem|key|crt|pfx|p12)$/i];
-// Allowlist, not a blocklist: images/binaries are simply never in this set, so they're
-// skipped without needing a separate "ignored binary extensions" list to maintain.
 const FOLDER_ALLOWED_EXT = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.html', '.css', '.scss', '.json', '.md', '.txt', '.yaml', '.yml', '.toml', '.xml', '.svg', '.sql', '.sh', '.bat', '.ps1', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.go', '.rs', '.php', '.vue', '.svelte']);
 const MAX_FOLDER_FILES = 50;
 const MAX_FOLDER_TOTAL_BYTES = 2 * 1024 * 1024;
@@ -285,12 +562,10 @@ function removeFolder(id) {
   const idx = pendingFolders.findIndex((f) => f.id === id);
   if (idx === -1) return;
   const [removed] = pendingFolders.splice(idx, 1);
-  removed.aborted = true; // lets an in-flight read batch notice and stop applying results
+  removed.aborted = true;
   renderAttachments();
 }
 
-// Reads the given (already-validated) entries off the main thread's path into a pendingFolders
-// entry, batch by batch, exactly like Phase 5 did — shared by the explorer's "Attach selected".
 async function readEligibleIntoFolder(entries, rootName) {
   const folder = { id: 'folder-' + (++attachmentIdSeq), kind: 'folder', name: rootName, status: 'processing', aborted: false, files: [], fileCount: entries.length };
   pendingFolders.push(folder);
@@ -322,7 +597,7 @@ async function readEligibleIntoFolder(entries, rootName) {
 
 // ---- Phase 6: Project Context Explorer — tri-state folder tree, lazily rendered ----
 const CTX_RENDER_BATCH = 200;
-let ctxState = null; // { rootName, fileMap: Map<relPath,File>, tree, selected: Set<relPath> }
+let ctxState = null;
 
 function buildFolderTree(eligible) {
   const root = { name: '', type: 'dir', path: '', children: new Map() };
@@ -347,7 +622,6 @@ function buildFolderTree(eligible) {
 const sortedChildren = (node) => Array.from(node.children.values()).sort((a, b) =>
   a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name));
 
-// Memoized: the tree is static once built, so each directory's flattened file list is computed once.
 function descendantFiles(node) {
   if (node.type === 'file') return [node];
   if (node._files) return node._files;
@@ -371,9 +645,6 @@ function toggleNodeSelection(node, checked) {
   refreshExplorerSummary();
 }
 
-// Walks the whole (in-memory, not just rendered) tree so every checkbox that *has* been
-// rendered gets its checked/indeterminate state resynced from the selection Set — covers
-// bulk toggles on folders whose children aren't all in the DOM yet.
 function refreshCheckboxStates(node = ctxState.tree) {
   if (node._el) {
     const state = nodeSelectionState(node);
@@ -410,7 +681,7 @@ function renderCtxNode(node) {
     label.className = 'ctx-label'; label.textContent = `📁 ${node.name}`;
     const files = descendantFiles(node);
     const count = document.createElement('span');
-    count.className = 'ctx-count'; count.textContent = `${files.length} file${files.length === 1 ? '' : 's'}`;
+    count.className = 'ctx-count';    count.textContent = `${files.length} file${files.length === 1 ? '' : 's'}`;
     row.append(chevron, cb, label, count);
     li.append(row, childUl);
     node._el = { cb };
@@ -418,7 +689,7 @@ function renderCtxNode(node) {
     const spacer = document.createElement('span');
     spacer.className = 'ctx-spacer';
     const label = document.createElement('span');
-    label.className = 'ctx-label'; label.textContent = `📄 ${node.name}`;
+        label.className = 'ctx-label'; label.textContent = '[FILE] ' + node.name;
     const size = document.createElement('span');
     size.className = 'ctx-size'; size.textContent = formatSize(node.size);
     row.append(spacer, cb, label, size);
@@ -428,8 +699,6 @@ function renderCtxNode(node) {
   return li;
 }
 
-// Only renders the next CTX_RENDER_BATCH children of `node` into `ul` — keeps directories
-// with hundreds/thousands of entries from freezing the DOM on first expand.
 function renderCtxChildrenBatch(node, ul) {
   const kids = sortedChildren(node);
   const start = node._rendered || 0;
@@ -469,8 +738,6 @@ function openContextExplorer(fileList) {
   if (!all.length) return;
   const rootName = (all[0].webkitRelativePath || all[0].name).split('/')[0] || 'Project';
 
-  // No file content is read here — only name/size/webkitRelativePath, same as Phase 5's
-  // metadata-only pass. The ignore rules and extension allowlist are reused verbatim.
   const eligible = [];
   for (const file of all) {
     const rel = file.webkitRelativePath || file.name;
@@ -485,7 +752,7 @@ function openContextExplorer(fileList) {
     rootName,
     fileMap: new Map(eligible.map((e) => [e.path, e.file])),
     tree: buildFolderTree(eligible),
-    selected: new Set(eligible.map((e) => e.path)), // default: whole folder, same as pre-Phase-6 behavior
+    selected: new Set(eligible.map((e) => e.path)),
   };
 
   $('ctxRootLabel').textContent = `📁 ${rootName} — ${eligible.length} eligible file${eligible.length === 1 ? '' : 's'}`;
@@ -501,7 +768,7 @@ function openContextExplorer(fileList) {
 
 function closeContextExplorer() { show('contextModal', false); ctxState = null; }
 $('ctxExplorerClose').onclick = closeContextExplorer;
-$('ctxCancel').onclick = closeContextExplorer; // Cancel means cancel: nothing in pendingFolders was touched while browsing.
+$('ctxCancel').onclick = closeContextExplorer;
 
 $('ctxAttach').onclick = async () => {
   if (!ctxState) return;
@@ -509,8 +776,6 @@ $('ctxAttach').onclick = async () => {
   const entries = Array.from(ctxState.selected, (p) => ({ path: p, file: ctxState.fileMap.get(p) })).filter((e) => e.file);
   if (!entries.length) { toast('Select at least one file.'); return; }
 
-  // Revalidate at attach time — selection could exceed limits even though each individual
-  // file passed the ignore/extension filter when the tree was built.
   if (entries.length > MAX_FOLDER_FILES) {
     toast(`Selected ${entries.length} files — the limit is ${MAX_FOLDER_FILES}. Deselect some and try again.`, 10000); return;
   }
@@ -523,7 +788,6 @@ $('ctxAttach').onclick = async () => {
     toast(`Files over ${Math.round(MAX_FOLDER_FILE_BYTES / 1024)}KB: ${tooBig.map((e) => e.path).join(', ')}.`, 12000); return;
   }
 
-  // A folder with the same root name already attached: replace it rather than stacking a duplicate.
   const existingIdx = pendingFolders.findIndex((f) => f.name === rootName);
   if (existingIdx === -1 && pendingFolders.length >= MAX_FOLDERS) {
     toast(`You can attach up to ${MAX_FOLDERS} project folders.`, 6000); return;
@@ -537,8 +801,8 @@ $('ctxAttach').onclick = async () => {
   await readEligibleIntoFolder(entries, rootName);
 };
 
-// ---- Phase 3: serialize attachments for the real request (renderer-side only; main.js re-validates) ----
-const MAX_TOTAL_SERIALIZED_CHARS = 20 * 1024 * 1024; // ~20MB of base64/text, matches main.js's budget
+// ---- Phase 3: serialize attachments for the real request ----
+const MAX_TOTAL_SERIALIZED_CHARS = 20 * 1024 * 1024;
 
 const readFileAsDataURL = (file) => new Promise((resolve, reject) => {
   const r = new FileReader();
@@ -586,7 +850,7 @@ async function buildAttachmentPayload() {
   return out;
 }
 
-// ---- Phase 4: speech-to-text dictation into #idea (renderer-only, Web Speech API) ----
+// ---- Phase 4: speech-to-text dictation into #idea ----
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 const micBtn = $('mic-btn');
 let recognition = null;
@@ -612,7 +876,6 @@ if (micBtn) {
 
 function startDictation() {
   const idea = $('idea');
-  // Insert at the cursor position as it was when dictation started; never clobber existing text.
   let cursor = idea.selectionStart ?? idea.value.length;
   recognition = new SpeechRecognitionCtor();
   recognition.continuous = true;
@@ -692,13 +955,19 @@ $('tbMin').onclick = () => pv.winMin();
 $('tbMax').onclick = () => pv.winMax();
 $('tbClose').onclick = () => pv.winClose();
 $('btnNewChat').onclick = () => {
-  // Reachable at any time, including mid-run — without stopping it first, the backend keeps
-  // streaming in the background and its eventual done/error event would later yank the view
-  // away from whatever the user's doing here.
   runAbandoned = true;
   pv.stop();
   show('result',false); show('run',false); show('setup'); $('idea').value=''; $('idea').focus();
 };
+
+$('btnStop').onclick = () => pv.stop();
+$('btnContinue').onclick = () => { const n = $('notes').value; $('notes').value = ''; show('notesBox', false); pv.sendNotes(n); };
+$('btnFinish').onclick = () => { show('notesBox', false); pv.sendNotes(null); };
+$('btnCopy').onclick = async () => { await pv.copy($('final').value); toast('Copied! Paste it into your coding AI.', 3000); };
+$('btnBack').onclick = () => { show('result', false); show('run', false); show('setup'); $('idea').focus(); };
+document.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => { await pv.copy($(b.dataset.copy).textContent); toast('Copied!', 1500); });
+document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.key === 'Enter' && !$('setup').classList.contains('hidden')) $('btnStart').click(); });
+$('btnAgain').onclick = () => { show('result', false); show('run', false); show('setup'); };
 
 async function loadHistory() {
   const items = await pv.runs();
@@ -709,7 +978,7 @@ async function loadHistory() {
     const el = document.createElement('div');
     el.className = 'hist-item';
     el.dataset.path = r.path;
-    el.title = stamp; // r.title is user-controlled (the idea's first line) — never into innerHTML/attributes unescaped
+    el.title = stamp;
     el.textContent = r.title || stamp;
     history.appendChild(el);
   }
@@ -759,8 +1028,8 @@ pv.onEvent((ev) => {
     case 'notice': toast('ℹ ' + ev.message, 8000); break;
     case 'done':
       streaming('author', false); streaming('critic', false); show('notesBox', false);
-      if (ev.file) loadHistory(); // a -final.md just landed on disk; the sidebar list was only ever built once at startup
-      if (runAbandoned) break; // user already left via New Volley; don't yank them into a view they didn't ask for
+      if (ev.file) loadHistory();
+      if (runAbandoned) break;
       if (!ev.final) { show('run', false); show('setup'); toast('Stopped.'); break; }
       $('final').value = ev.final;
       $('savedAt').textContent = ev.file ? `Saved to ${ev.file}` : 'Stopped early — this is the latest draft.';

@@ -50,11 +50,22 @@
       </div>
     </div>
     <div class="row">
-      <label>✍ Writer AI <small>writes the prompt</small><input id="author" list="modelList" spellcheck="false"></label>
-      <label>🔍 Reviewer AI <small>picks it apart</small><input id="critic" list="modelList" spellcheck="false"></label>
+      <label>✍ Writer AI <small>writes the prompt</small>
+        <div class="provider-model-select">
+          <select id="authorProvider" class="provider-select"></select>
+          <input id="author" list="authorModelList" spellcheck="false" placeholder="Select provider first">
+          <datalist id="authorModelList"></datalist>
+        </div>
+      </label>
+      <label>🔍 Reviewer AI <small>picks it apart</small>
+        <div class="provider-model-select">
+          <select id="criticProvider" class="provider-select"></select>
+          <input id="critic" list="criticModelList" spellcheck="false" placeholder="Select provider first">
+          <datalist id="criticModelList"></datalist>
+        </div>
+      </label>
       <label>Max rounds <small>3 is plenty</small><input id="rounds" type="number" min="1" max="8" value="3"></label>
     </div>
-    <datalist id="modelList"></datalist>
     <label class="check"><input type="checkbox" id="auto"> Hands-off mode (don't pause for my notes between rounds)</label>
     <button class="big" id="btnStart">Start the volley</button> <span class="hint">or press Ctrl+Enter</span>
   </section>
@@ -76,24 +87,54 @@
   <section id="result" class="card hidden">
     <h2>🎉 Your finished prompt</h2>
     <p class="hint">You can edit this before copying.</p><textarea id="final" spellcheck="false"></textarea>
-    <div class="row"><button class="big" id="btnCopy">📋 Copy prompt</button><button class="ghost" id="btnBack">✏ Tweak my idea &amp; re-run</button><button class="ghost" id="btnAgain">Start a new one</button></div>
+    <div class="row"><button class="big" id="btnCopy">📋 Copy prompt</button><button class="ghost" id="btnBack">✏ Tweak my idea & re-run</button><button class="ghost" id="btnAgain">Start a new one</button></div>
     <p class="hint" id="savedAt"></p>
   </section>
   </main>
 </div>
 
-<div id="modal" class="modal hidden"><div class="card">
-  <h2 id="modalTitle">Welcome! One-time setup</h2>
-  <ol class="steps">
-    <li>Make a free account at <a href="#" data-url="https://openrouter.ai">openrouter.ai</a></li>
-    <li>Add a few dollars of credit: <a href="#" data-url="https://openrouter.ai/credits">openrouter.ai/credits</a></li>
-    <li>Create a key at <a href="#" data-url="https://openrouter.ai/keys">openrouter.ai/keys</a> and paste it here:</li>
-  </ol>
-  <input id="keyInput" type="password" placeholder="sk-or-..." spellcheck="false">
-  <div id="keyMsg" class="msg"></div>
-  <div class="row"><button class="big" id="btnSaveKey">Save key</button><button class="ghost" id="btnCloseModal">Close</button></div>
-  <p class="hint">Your key is stored encrypted on this computer only.</p>
+<div id="modal" class="modal hidden"><div class="card settings-card">
+  <h2 id="modalTitle">Settings</h2>
+  <div class="settings-tabs" id="settingsTabs">
+    <button class="tab-btn active" data-tab="providers">🔌 Providers</button>
+    <button class="tab-btn" data-tab="openrouter">🔑 OpenRouter Key</button>
+    <button class="tab-btn" data-tab="about">ℹ About</button>
+  </div>
+  
+  <!-- Providers tab -->
+  <div class="tab-panel active" id="tabProviders">
+    <h2>AI Providers</h2>
+    <p class="hint">Connect your AI accounts. Each provider uses its official authentication method.</p>
+    <div class="provider-list" id="providerList"></div>
+    <div class="hint">Providers marked <strong>CLI</strong> require the official CLI tool installed and logged in via terminal.</div>
+  </div>
+  
+  <!-- OpenRouter legacy tab -->
+    <div class="tab-panel hidden" id="tabOpenrouter">
+    <h2>OpenRouter API Key</h2>
+    <ol class="steps">
+      <li>Make a free account at <a href="#" data-url="https://openrouter.ai">openrouter.ai</a></li>
+      <li>Add a few dollars of credit: <a href="#" data-url="https://openrouter.ai/credits">openrouter.ai/credits</a></li>
+      <li>Create a key at <a href="#" data-url="https://openrouter.ai/keys">openrouter.ai/keys</a> and paste it here:</li>
+    </ol>
+    <input id="keyInput" type="password" placeholder="sk-or-..." spellcheck="false">
+    <div id="keyMsg" class="msg"></div>
+    <div class="row"><button class="big" id="btnSaveKey">Save key</button><button class="ghost" id="btnCloseModal">Close</button></div>
+    <p class="hint">Your key is stored encrypted on this computer only.</p>
+  </div>
+  
+  <!-- About tab -->
+  <div class="tab-panel hidden" id="tabAbout">
+    <h2>About VolleyPrompt</h2>
+    <p class="hint">Two AIs volley your prompt back and forth until it's actually good.</p>
+    <p class="hint"><strong>Providers:</strong> OpenRouter, OpenAI (Codex CLI), Anthropic, Google Gemini (CLI), Ollama (Local)</p>
+    <p class="hint"><strong>Security:</strong> API keys encrypted with OS keychain. CLI providers use official OAuth flows.</p>
+    <p class="hint"><strong>Version:</strong> 1.2.0</p>
+  </div>
+  
+  <div class="row"><button class="ghost" id="btnCloseModal">Close</button></div>
 </div></div>
+
 <div id="contextModal" class="modal hidden"><div class="card explorer-card">
   <div class="explorer-head">
     <h2>Select project context</h2>
