@@ -794,7 +794,46 @@ $('btnVariantCancel').onclick = () => show('variantBox', false);
 $('variantInstruction').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('btnVariantGo').click(); }
 });
-$('btnCursor').onclick = async () => { await pv.copy($('final').value); await pv.openUrl('cursor://'); toast('Prompt copied. Cursor is opening if installed.', 5000); };
+// ---- Send to ▸ (todo B1): land the finished prompt in the chosen agent, formatting intact.
+// Every target copies first (the clipboard is the transport), then opens the agent's scheme;
+// Hermes needs the desktop app (a browser page cannot start local CLIs) and says so.
+const sendMenu = $('sendMenu');
+const closeSendMenu = () => { sendMenu.classList.add('hidden'); sendMenu.classList.remove('visible'); };
+$('btnSendTo').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!sendMenu.classList.contains('hidden')) { closeSendMenu(); return; }
+  const r = e.currentTarget.getBoundingClientRect();
+  sendMenu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 240)) + 'px';
+  sendMenu.style.top = Math.min(r.bottom + 6, window.innerHeight - 190) + 'px';
+  sendMenu.classList.remove('hidden'); sendMenu.classList.add('visible');
+});
+document.addEventListener('click', (e) => {
+  if (sendMenu.classList.contains('hidden')) return;
+  if (sendMenu.contains(e.target) || e.target.closest('#btnSendTo')) return;
+  closeSendMenu();
+});
+sendMenu.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSendMenu(); });
+const SEND_TARGETS = { cursor: 'Cursor', claude: 'Claude', vscode: 'VS Code', cline: 'Cline' };
+sendMenu.addEventListener('click', async (e) => {
+  const item = e.target.closest('.menu-item');
+  if (!item) return;
+  closeSendMenu();
+  const kind = item.dataset.send;
+  const prompt = $('final').value;
+  if (!prompt.trim()) { toast('Nothing to send — the prompt is empty.', 4000); return; }
+  await pv.copy(prompt);
+  if (kind === 'hermes') {
+    try {
+      const res = await pv.hermesRun(prompt);
+      toast(res.ok ? 'Hermes is running the prompt.' : (res.message || 'Hermes handoff needs the desktop app.'), 8000);
+    } catch { toast('Hermes handoff needs the desktop app. The prompt is on your clipboard.', 8000); }
+    return;
+  }
+  const label = SEND_TARGETS[kind];
+  if (!label) return;
+  await pv.openUrl({ cursor: 'cursor://', claude: 'claude://', vscode: 'vscode://', cline: 'vscode://' }[kind]);
+  toast(`Prompt copied. ${label} is opening if installed — paste with Ctrl+V.`, 6000);
+});
 $('btnReplay').onclick = () => {
   const data = { title: lastRunMeta?.project || 'VolleyPrompt replay', snapshots: runSnapshots };
   const doc = `<!doctype html><meta charset="utf-8"><title>VolleyPrompt replay</title><style>body{background:#080611;color:#e8e2ff;font:16px system-ui;max-width:900px;margin:3em auto;padding:0 2em}pre{white-space:pre-wrap;background:#151020;padding:1em;border-radius:12px}button{padding:.7em 1em;margin:.3em}</style><h1>VolleyPrompt · ${escapeHtml(data.title)}</h1><div id="v"></div><button id="p">← Previous</button><button id="n">Next →</button><script>const s=${JSON.stringify(data.snapshots).replace(/</g,'\\u003c')};let i=0;function r(){document.querySelector('#v').innerHTML='<h2>Round '+(s[i]?.round||0)+' · Fitness '+(s[i]?.score??'—')+'/100 · '+(s[i]?.verdict||'')+'</h2><h3>Draft</h3><pre>'+s[i].draft.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</pre><h3>Review</h3><pre>'+s[i].review.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</pre>'}document.querySelector('#p').onclick=()=>{i=Math.max(0,i-1);r()};document.querySelector('#n').onclick=()=>{i=Math.min(s.length-1,i+1);r()};r();</script>`;

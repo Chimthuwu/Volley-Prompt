@@ -967,7 +967,50 @@ $('btnVariantCancel').onclick = () => show('variantBox', false);
 $('variantInstruction').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('btnVariantGo').click(); }
 });
-$('btnCursor').onclick = async () => { await pv.copy($('final').value); await pv.openUrl('cursor://'); toast('Prompt copied. Cursor is opening if installed.', 5000); };
+// ---- Send to ▸ (todo B1): land the finished prompt in the chosen agent, formatting intact.
+// Every target copies first (the clipboard is the transport), then opens the agent's scheme;
+// Hermes instead runs the prompt through the local CLI via pv.hermesRun().
+const sendMenu = $('sendMenu');
+const closeSendMenu = () => { sendMenu.classList.add('hidden'); sendMenu.classList.remove('visible'); };
+$('btnSendTo').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!sendMenu.classList.contains('hidden')) { closeSendMenu(); return; }
+  const r = e.currentTarget.getBoundingClientRect();
+  sendMenu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 240)) + 'px';
+  sendMenu.style.top = Math.min(r.bottom + 6, window.innerHeight - 190) + 'px';
+  sendMenu.classList.remove('hidden'); sendMenu.classList.add('visible');
+});
+document.addEventListener('click', (e) => {
+  if (sendMenu.classList.contains('hidden')) return;
+  if (sendMenu.contains(e.target) || e.target.closest('#btnSendTo')) return;
+  closeSendMenu();
+});
+sendMenu.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSendMenu(); });
+const SEND_TARGETS = { cursor: 'Cursor', claude: 'Claude', vscode: 'VS Code', cline: 'Cline' };
+sendMenu.addEventListener('click', async (e) => {
+  const item = e.target.closest('.menu-item');
+  if (!item) return;
+  closeSendMenu();
+  const kind = item.dataset.send;
+  const prompt = $('final').value;
+  if (!prompt.trim()) { toast('Nothing to send — the prompt is empty.', 4000); return; }
+  await pv.copy(prompt);
+  if (kind === 'hermes') {
+    toast('Prompt copied — handing it to the Hermes CLI…', 4000);
+    show('utilityOutput'); $('utilityTitle').textContent = 'Hermes · running the prompt locally…'; $('utilityText').textContent = '';
+    try {
+      const res = await pv.hermesRun(prompt);
+      $('utilityTitle').textContent = res.ok ? 'Hermes · done' : 'Hermes · could not run';
+      $('utilityText').textContent = res.output || res.message || '(no output)';
+      if (!res.ok) toast(res.message || 'Hermes did not return output.', 8000);
+    } catch (err) { $('utilityTitle').textContent = 'Hermes · failed'; $('utilityText').textContent = err.message || String(err); }
+    return;
+  }
+  const label = SEND_TARGETS[kind];
+  if (!label) return;
+  await pv.openUrl({ cursor: 'cursor://', claude: 'claude://', vscode: 'vscode://', cline: 'vscode://' }[kind]);
+  toast(`Prompt copied. ${label} is opening if installed — paste with Ctrl+V.`, 6000);
+});
 function replayHtml() {
   const title = escapeHtml(lastRunMeta?.project || 'VolleyPrompt replay');
   const snapshots = JSON.stringify(runSnapshots).replace(/</g, '\\u003c');

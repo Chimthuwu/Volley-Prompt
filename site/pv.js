@@ -654,6 +654,9 @@ VERDICT: APPROVE if there are no HIGH issues left, otherwise VERDICT: REVISE.`;
     projects: async () => listProjects(),
     renameProject: async (from, to) => renameProject(from, to),
     deleteProject: async (name) => deleteProject(name),
+    // "Send to ▸ Hermes" needs a local CLI; a browser page cannot start one. The UI copies
+    // the prompt first, so this message can point the user at the desktop app.
+    hermesRun: async () => ({ ok: false, message: "Hermes handoff runs in the desktop app (a browser page can't start local CLIs). The prompt is on your clipboard — paste it into a terminal running: hermes chat" }),
     updateRun: async (name, patch) => {
       const items = loadHistoryList(), item = items.find((x) => x.name === name);
       if (!item) return false;

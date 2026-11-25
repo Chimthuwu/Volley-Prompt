@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('pv', {
   // Sidebar history management: rename / delete / move a volley, and rename / delete a project group.
   renameRun: inv('runs:rename'), deleteRun: inv('runs:delete'), moveRun: inv('runs:move'),
   projects: inv('projects:list'), renameProject: inv('projects:rename'), deleteProject: inv('projects:delete'),
+  // "Send to ▸ Hermes": run the finished prompt through the local Hermes CLI.
+  hermesRun: inv('hermes:run'),
   githubTokenInfo: inv('github:token:has'), saveGithubToken: inv('github:token:set'), clearGithubToken: inv('github:token:clear'), fetchGithubRepo: inv('github:repo:fetch'),
   // Multi-provider support
   providersList: inv('providers:list'), providersStatus: inv('providers:status'),

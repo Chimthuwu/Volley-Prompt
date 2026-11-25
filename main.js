@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, safeStorage, shell, clipboard } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const runsStore = require('./lib/runs-store.js');
 const providerModule = require('./lib/providers.js');
 
@@ -359,6 +360,39 @@ ipcMain.handle('projects:delete', (_e, name) => runsStore.deleteProject(runsDir(
 ipcMain.handle('url:open', (_e, u) => {
   if (typeof u === 'string' && (/^https:\/\//i.test(u) || /^(cursor|claude|vscode):\/\//i.test(u))) shell.openExternal(u);
 });
+// "Send to Hermes" (todo B1): run the finished prompt through the local Hermes CLI
+// (`hermes chat -q "<prompt>"`) — a direct handoff on this machine, no chat platform involved.
+// The CLI is optional: a missing or non-spawnable binary resolves with a friendly message
+// instead of throwing, so the UI can show guidance rather than an error dialog.
+ipcMain.handle('hermes:run', (_e, prompt) => new Promise((resolve) => {
+  const text = typeof prompt === 'string' ? prompt.slice(0, 200000) : '';
+  if (!text.trim()) { resolve({ ok: false, message: 'Nothing to send — the prompt is empty.' }); return; }
+  let child;
+  try {
+    child = spawn('hermes', ['chat', '-q', text], { windowsHide: true });
+  } catch (e) { resolve({ ok: false, message: `Could not start the Hermes CLI (${e.code || e.message}). The prompt is on your clipboard — paste it into a terminal running: hermes chat` }); return; }
+  let out = '', err = '', done = false;
+  const finish = () => {
+    if (done) return; done = true; clearTimeout(timer);
+    const output = (out + (err ? `\n${err}` : '')).slice(0, 100000).trim();
+    resolve({ ok: Boolean(out.trim()) && !/ENOENT|not recognized/i.test(err), output: output || 'Hermes returned no output.' });
+  };
+  const timer = setTimeout(() => {
+    if (done) return;
+    err += '\nTimed out after 5 minutes (the run was stopped).';
+    try { child.kill(); } catch {}
+    finish();
+  }, 5 * 60 * 1000);
+  child.stdout?.on('data', (d) => { out += d; });
+  child.stderr?.on('data', (d) => { err += d; });
+  child.on('error', (e) => {
+    err += e.code === 'ENOENT'
+      ? "\nThe Hermes CLI wasn't found on this computer's PATH. Install it, or paste the prompt into a terminal running: hermes chat"
+      : `\n${e.message}`;
+    finish();
+  });
+  child.on('close', () => finish());
+}));
 // Loads a saved run's final prompt (plus the original idea) so the sidebar history is
 // clickable, not just a list of titles.
 ipcMain.handle('runs:update', (_e, name, patch) => runsStore.updateRun(runsDir(), name, patch));

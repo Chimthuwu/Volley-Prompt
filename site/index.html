@@ -137,7 +137,7 @@
         <span>Annotate</span>
       </button>
     </div>
-    <div class="result-tools"><button class="ghost" id="btnTestDrive">🧪 Test-drive</button><button class="ghost" id="btnVariant">↔ Variant</button><button class="ghost" id="btnReplay">⏯ Export replay</button><button class="ghost" id="btnShareCard">🖼 Share card</button><button class="ghost" id="btnCursor">↗ Copy + Cursor</button></div>
+    <div class="result-tools"><button class="ghost" id="btnTestDrive">🧪 Test-drive</button><button class="ghost" id="btnVariant">↔ Variant</button><button class="ghost" id="btnReplay">⏯ Export replay</button><button class="ghost" id="btnShareCard">🖼 Share card</button><button class="ghost" id="btnSendTo" title="Send this prompt to a coding agent — Cursor, Claude, VS Code or Cline">↗ Send to ▾</button></div>
     <div class="row"><label>Outcome <small>help measure prompt usefulness</small><select id="outcomeTag"><option value="">Not rated</option><option value="used">Used as-is</option><option value="edited">Edited first</option><option value="failed">Didn't work</option><option value="unused">Didn't use</option></select></label></div>
     <div class="variant-box hidden" id="variantBox">
       <label>What should the variant change? <small>optional — leave blank for an independent alternative</small>
@@ -240,6 +240,15 @@
   <div class="menu-item danger" data-action="delete" data-scope="run">Delete</div>
   <div class="menu-item" data-action="rename-project" data-scope="project">Rename folder</div>
   <div class="menu-item danger" data-action="delete-project" data-scope="project">Delete folder</div>
+</div>
+
+<!-- Send to ▸ (todo B1): one click copies the finished prompt and hands it to the chosen agent. -->
+<div id="sendMenu" class="context-menu hidden" style="min-width:220px">
+  <div class="menu-item" data-send="cursor" title="Copy the prompt, then open Cursor">↗ Cursor — copy + open</div>
+  <div class="menu-item" data-send="claude" title="Copy the prompt, then open the Claude desktop app">🤖 Claude — copy + open</div>
+  <div class="menu-item" data-send="vscode" title="Copy the prompt, then open VS Code">🟦 VS Code — copy + open</div>
+  <div class="menu-item" data-send="cline" title="Copy the prompt and open VS Code, then paste it into the Cline extension">🧩 Cline — copy, open VS Code</div>
+  <div class="menu-item" data-send="hermes" title="Needs the desktop app — a browser page can't start the local Hermes CLI">⚡ Hermes — run locally (desktop app)</div>
 </div>
 
 <!-- Prompt / confirm dialog. window.prompt() and window.confirm() are not available in
