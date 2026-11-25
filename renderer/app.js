@@ -1904,7 +1904,10 @@ async function openHistoryItem(name) {
   // Opening a history item abandons any background run, same as New Volley.
   runAbandoned = true;
   const d = parseStamp(name);
-  show('result', false); show('run', false); show('result');
+  // The composer stays hidden while a saved volley is open (it used to sit above the result and
+  // force a scroll); "+ New volley" brings it back.
+  show('setup', false); show('result', false); show('run', false); show('result');
+  window.scrollTo(0, 0); document.querySelector('main')?.scrollTo?.(0, 0);
   $('final').value = got.final;
   showIdeaRecap(got.idea, (d ? `Loaded from history · ${d.toLocaleString()}` : 'Loaded from history') + (item.incomplete ? ' · stopped draft' : ''));
   updateResultButtons();

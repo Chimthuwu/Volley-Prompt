@@ -101,6 +101,8 @@ test('re-run restores idea, models, rounds, mode and warns about attachments', a
   const { doc, w } = await boot();
   doc.querySelector('.hist-item').click();
   await new Promise((r) => setTimeout(r, 40));
+  assert.ok(doc.getElementById('setup').classList.contains('hidden'), 'composer is hidden while a saved volley is open');
+  assert.ok(!doc.getElementById('result').classList.contains('hidden'));
   assert.strictEqual(doc.getElementById('btnRerun').hidden, false);
   doc.getElementById('btnRerun').click();
   await new Promise((r) => setTimeout(r, 60));
