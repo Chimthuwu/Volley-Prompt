@@ -324,7 +324,7 @@ ipcMain.handle('models:list', async (_e, options = {}) => {
     const perM = (prompt + completion) * 1e6;
     const isFree = perM === 0 || /:free$/i.test(m.id);
     const isStealth = /stealth|cloak/i.test(m.id) || /stealth|cloak/i.test(m.name || '');
-    return { id: m.id, perM, isFree, isStealth, vision: !!m.architecture?.input_modalities?.includes?.('image') };
+    return { id: m.id, perM, inPerM: prompt * 1e6, outPerM: completion * 1e6, isFree, isStealth, vision: !!m.architecture?.input_modalities?.includes?.('image') };
   }).filter((m) => options?.all || m.isFree || m.isStealth || m.perM <= CHEAP_PER_M_TOKENS);
   const rank = (m) => (m.isFree ? 0 : m.isStealth ? 1 : 2);
   rows.sort((a, b) => rank(a) - rank(b) || a.perM - b.perM || a.id.localeCompare(b.id));
@@ -733,8 +733,14 @@ ipcMain.handle('run:start', async (_e, cfg) => {
   };
 
   let draft = '', finalSaved = false;
+  // Everything needed to re-run this volley with one click (attachment contents are never
+  // stored - only their names, so the UI can remind you what to re-attach).
+  const runConfig = { rounds, auto: !!cfg.auto, authorProvider: providersByRole.author, criticProvider: providersByRole.critic, fallback: fallbackModel, fallbackProvider: providersByRole.fallback, outputMode: deepPlan ? 'deep-plan' : 'prompt' };
+  const attachmentNames = [
+    ...images.map((i) => i.name), ...textFiles.map((f) => f.name), ...folders.map((f) => `${f.name}/`),
+  ];
   const persistRunMeta = (extra = {}) => {
-    try { fs.writeFileSync(path.join(runsDir(), `${stamp}.meta.json`), JSON.stringify({ project: cfg.project || '', snapshots, metrics, cost: actualCost, tokens: usagePrompt + usageCompletion, score: snapshots.at(-1)?.score ?? null, rubric: cfg.rubric || '', outputMode: cfg.outputMode === 'deep-plan' ? 'deep-plan' : 'prompt', modelPair: { ...runModels }, ...extra }, null, 2)); } catch {}
+    try { fs.writeFileSync(path.join(runsDir(), `${stamp}.meta.json`), JSON.stringify({ project: cfg.project || '', snapshots, metrics, cost: actualCost, tokens: usagePrompt + usageCompletion, score: snapshots.at(-1)?.score ?? null, rubric: cfg.rubric || '', outputMode: cfg.outputMode === 'deep-plan' ? 'deep-plan' : 'prompt', modelPair: { ...runModels }, config: runConfig, attachments: attachmentNames, ...extra }, null, 2)); } catch {}
   };
   persistRunMeta(); // includes usage from an optional image-description pass
   // A Stop with partial text still lands on disk, flagged as a stopped draft (-draft.md).

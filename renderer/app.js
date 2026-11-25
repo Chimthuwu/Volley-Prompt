@@ -1,3 +1,4 @@
+const { escapeHtml, extOf, formatSize, diffOps, rankContextFiles, parseStamp, filterRuns, estimateRunCost, formatMoney } = window.VPH;
 const $ = (id) => document.getElementById(id);
 const show = (id, on = true) => $(id).classList.toggle('hidden', !on);
 const store = {
@@ -746,22 +747,6 @@ $('btnDelPreset').onclick = () => {
 refreshPresetSelect();
 
 // 2. Render a revision round as a line diff instead of a silent full rewrite.
-function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-function diffOps(A, B) {
-  if (A.length * B.length > 160000) return null; // absurdly long prompt — plain text wins
-  const n = A.length, m = B.length;
-  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const ops = []; let i = 0, j = 0;
-  while (i < n && j < m) {
-    if (A[i] === B[j]) { ops.push({ type: 'same', text: A[i] }); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ type: 'del', text: A[i++] }); }
-    else { ops.push({ type: 'ins', text: B[j++] }); }
-  }
-  while (i < n) ops.push({ type: 'del', text: A[i++] });
-  while (j < m) ops.push({ type: 'ins', text: B[j++] });
-  return ops;
-}
 function renderLineDiff(el, oldText, newText) {
   const ops = diffOps(oldText.split('\n'), newText.split('\n'));
   if (!ops) { el.textContent = newText; return; }
@@ -1027,8 +1012,6 @@ const MAX_FILES = 10;
 let pendingAttachments = [];
 let attachmentIdSeq = 0;
 
-const extOf = (name) => { const i = name.lastIndexOf('.'); return i === -1 ? '' : name.slice(i).toLowerCase(); };
-const formatSize = (bytes) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const isDuplicateFile = (file) => pendingAttachments.some((a) => a.file.name === file.name && a.file.size === file.size && a.file.lastModified === file.lastModified);
 
 function addAttachmentFiles(fileList) {
@@ -1186,21 +1169,6 @@ function isFolderPathIgnored(relPath) {
   if (base.startsWith('.')) return true;
   if (IGNORED_FILE_NAMES.has(base)) return true;
   return IGNORED_FILE_PATTERNS.some((rx) => rx.test(base));
-}
-
-// Relevance ranking for oversized folder selections: when more than MAX_FOLDER_FILES files
-// are selected, the top of this ranking is what gets read. Entry points and configs first,
-// then source code, then docs/styles, then everything else; shallower paths beat deeper
-// ones at the same tier so a project's core files outrank nested utilities.
-const CONTEXT_KEY_FILE_RX = /(^|\/)(readme[^/]*|package\.json|pyproject\.toml|cargo\.toml|go\.mod|requirements[^/]*|composer\.json|gemfile|makefile|dockerfile[^/]*|tsconfig[^/]*|vite\.config\.[^/]*|webpack\.config\.[^/]*|tailwind\.config\.[^/]*|main\.[a-z]+|index\.[a-z]+|app\.[a-z]+|server\.[a-z]+|routes?\.[a-z]+|config\.[a-z]+)$/i;
-const CONTEXT_EXT_RANK = { '.ts': 0, '.tsx': 0, '.js': 0, '.jsx': 0, '.mjs': 0, '.cjs': 0, '.py': 0, '.cs': 1, '.go': 1, '.rs': 1, '.java': 1, '.c': 1, '.cpp': 1, '.h': 1, '.hpp': 1, '.php': 1, '.vue': 1, '.svelte': 1, '.md': 2, '.html': 2, '.css': 2, '.scss': 2, '.sql': 2, '.sh': 2, '.bat': 2, '.ps1': 2, '.json': 2, '.yaml': 2, '.yml': 2, '.toml': 2, '.xml': 2, '.svg': 3, '.txt': 3 };
-function rankContextFiles(entries) {
-  return entries.map((e) => {
-    const path = e.path || e.name || '';
-    const depth = path.split('/').length;
-    const tier = CONTEXT_KEY_FILE_RX.test(path) ? 0 : (CONTEXT_EXT_RANK[extOf(path)] ?? 4);
-    return { e, score: tier * 1000 + depth * 10 + path.length / 100 };
-  }).sort((a, b) => a.score - b.score).map((x) => x.e);
 }
 
 function setProcessingLock(on) {
@@ -1811,17 +1779,45 @@ $('btnNewChat').onclick = () => {
 };
 
 let historyItems = [];
+let historyQuery = '';
+let compareFirst = null; // history name picked as the left side of a comparison
+const OUTCOME_ICON = { used: '✓', edited: '✎', failed: '!', unused: '–' };
+
+function historyTarget(name) {
+  const run = historyItems.find((x) => x.name === name);
+  return {
+    kind: 'run', name,
+    title: (run && run.title) || name.replace(/-final\.md$|-draft\.md$/, ''),
+    key: (run && run.meta && run.meta.project) || '',
+  };
+}
+
 async function loadHistory() {
-  historyItems = await pv.runs();
+  historyItems = (await pv.runs()) || [];
   const history = $('history');
   history.textContent = '';
+  const shown = filterRuns(historyItems, historyQuery);
+  if (!shown.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-empty';
+    empty.textContent = historyQuery ? 'No volleys match your search.' : 'No volleys yet — your finished prompts will appear here.';
+    history.appendChild(empty);
+    return;
+  }
   const groups = new Map();
-  for (const r of historyItems) {
+  for (const r of shown) {
     // The project name is the folder; '' is the "Other volleys" fallback bucket.
     const key = (r.meta && r.meta.project) || '';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
   }
+  const act = (icon, tip, action, name, danger) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.title = tip; b.setAttribute('aria-label', tip); b.textContent = icon;
+    if (danger) b.className = 'danger';
+    b.addEventListener('click', (e) => { e.stopPropagation(); runHistoryAction(action, historyTarget(name)); });
+    return b;
+  };
   for (const [key, items] of groups) {
     const heading = document.createElement('div');
     heading.className = 'history-project';
@@ -1838,19 +1834,46 @@ async function loadHistory() {
     for (const r of items) {
       const stamp = r.name.replace(/-(final|draft)\.md$/, '');
       const el = document.createElement('div');
-      el.className = 'hist-item';
+      el.className = 'hist-item' + (compareFirst === r.name ? ' compare-pending' : '');
       el.dataset.path = r.path;
       el.dataset.id = r.name; // For context menu / drag-drop referencing
-      el.title = stamp; // r.title is user-controlled (the idea's first line) — never into innerHTML/attributes unescaped
-      el.textContent = (r.incomplete ? '✂ ' : '') + (r.title || stamp);
+      el.tabIndex = 0;
+      el.title = `${stamp}\nF2 rename · Delete remove · Enter open`; // r.title is user-controlled: never into innerHTML
+      const title = document.createElement('span');
+      title.className = 'hist-title';
+      title.textContent = (r.incomplete ? '✂ ' : '') + (r.title || stamp)
+        + (r.meta?.outcome ? ` · ${OUTCOME_ICON[r.meta.outcome] || ''}` : '')
+        + (r.meta?.score != null ? ` · ${r.meta.score}` : '');
+      const actions = document.createElement('span');
+      actions.className = 'hist-actions';
+      actions.append(
+        act('✎', 'Rename (F2)', 'rename', r.name),
+        act('📁', 'Move to folder', 'move', r.name),
+        act('⚖', 'Compare with another volley', 'compare', r.name),
+        act('🗑', 'Delete (Del)', 'delete', r.name, true),
+      );
+      el.append(title, actions);
       el.draggable = true;
       // Saved runs are on disk; clicking loads the final prompt (and the original idea) via pv.openRun.
       el.addEventListener('click', () => openHistoryItem(r.name));
-      if (r.meta?.outcome) el.textContent += ` · ${({ used: '✓', edited: '✎', failed: '!', unused: '–' })[r.meta.outcome] || ''}`;
+      el.addEventListener('keydown', (e) => {
+        if (e.target !== el) return;
+        if (e.key === 'F2') { e.preventDefault(); runHistoryAction('rename', historyTarget(r.name)); }
+        else if (e.key === 'Delete') { e.preventDefault(); runHistoryAction('delete', historyTarget(r.name)); }
+        else if (e.key === 'Enter') { e.preventDefault(); openHistoryItem(r.name); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const all = [...history.querySelectorAll('.hist-item')];
+          const next = all[all.indexOf(el) + (e.key === 'ArrowDown' ? 1 : -1)];
+          if (next) next.focus();
+        }
+      });
       history.appendChild(el);
     }
   }
 }
+$('historySearch').addEventListener('input', () => { historyQuery = $('historySearch').value; loadHistory(); });
+$('historySearch').addEventListener('keydown', (e) => { if (e.key === 'Escape') { $('historySearch').value = ''; historyQuery = ''; loadHistory(); } });
 
 function showIdeaRecap(idea, whenText) {
   // Any freshly shown result (new run or history load) starts expanded.
@@ -1880,14 +1903,11 @@ async function openHistoryItem(name) {
   $('modelInfo').textContent = mp ? `Models: Writer ${mp.author} · Reviewer ${mp.critic}${got.meta?.cost ? ` · $${Number(got.meta.cost).toFixed(4)}` : ''}` : 'Models: not recorded for this volley';
   // Opening a history item abandons any background run, same as New Volley.
   runAbandoned = true;
-  const stamp = String(name).replace(/-(final|draft)\.md$/, '');
-  // Run stamps are written in UTC (toISOString), so parse them as UTC to show the right local time.
-  const d = /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$/.test(stamp)
-    ? new Date(stamp.replace(/^(\d{4}-\d{2}-\d{2})-(\d{2})-(\d{2})-(\d{2})$/, '$1T$2:$3:$4Z'))
-    : null;
+  const d = parseStamp(name);
   show('result', false); show('run', false); show('result');
   $('final').value = got.final;
-  showIdeaRecap(got.idea, (d && !isNaN(d) ? `Loaded from history · ${d.toLocaleString()}` : 'Loaded from history') + (item.incomplete ? ' · stopped draft' : ''));
+  showIdeaRecap(got.idea, (d ? `Loaded from history · ${d.toLocaleString()}` : 'Loaded from history') + (item.incomplete ? ' · stopped draft' : ''));
+  updateResultButtons();
 }
 loadHistory();
 
@@ -2024,6 +2044,18 @@ async function runHistoryAction(action, target) {
       toast('Volley deleted.', 3000);
       await loadHistory();
     } else toast('Delete failed.', 4000);
+  } else if (action === 'rerun') {
+    await rerunFromHistory(target.name);
+  } else if (action === 'compare') {
+    if (!compareFirst || compareFirst === target.name) {
+      compareFirst = compareFirst === target.name ? null : target.name;
+      await loadHistory();
+      toast(compareFirst ? 'Now click ⚖ (or right-click → Compare with…) on a second volley.' : 'Comparison cancelled.', 5000);
+    } else {
+      const a = compareFirst; compareFirst = null;
+      await loadHistory();
+      window.openCompare(a, target.name);
+    }
   } else if (action === 'rename-project') {
     const name = await askText({ title: 'Rename folder', label: 'Folder name', value: target.label, okLabel: 'Rename' });
     if (name === null) return;
@@ -2064,13 +2096,7 @@ if (historyEl) {
     const item = e.target.closest('.hist-item');
     if (item) {
       e.preventDefault();
-      const name = item.dataset.id;
-      const run = historyItems.find((x) => x.name === name);
-      openContextMenu(e, {
-        kind: 'run', name,
-        title: (run && run.title) || name.replace(/-final\.md$|-draft\.md$/, ''),
-        key: (run && run.meta && run.meta.project) || '',
-      });
+      openContextMenu(e, historyTarget(item.dataset.id));
       return;
     }
     const group = e.target.closest('.history-project');
@@ -2125,6 +2151,71 @@ if (historyEl) {
     if (ok) { toast('Volley moved.', 2500); await loadHistory(); }
   });
 }
+
+// ---- Re-run with the same setup: idea, models, providers, rounds, mode, rubric from saved metadata ----
+async function rerunFromHistory(name) {
+  const got = await pv.openRun(name).catch(() => null);
+  if (!got) { toast('Could not load that volley.', 5000); return; }
+  const m = got.meta || {}, c = m.config || {}, pair = m.modelPair || {};
+  $('idea').value = got.idea || '';
+  $('projectName').value = m.project || '';
+  if (pair.author) { $('author').value = pair.author; store.set('author', pair.author); }
+  if (pair.critic) { $('critic').value = pair.critic; store.set('critic', pair.critic); }
+  if (c.rounds) $('rounds').value = String(c.rounds);
+  $('auto').checked = !!c.auto;
+  $('outputMode').value = c.outputMode === 'deep-plan' ? 'deep-plan' : 'prompt';
+  for (const [sel, key, val] of [['authorProvider', 'authorProvider', c.authorProvider], ['criticProvider', 'criticProvider', c.criticProvider]]) {
+    if (val) { $(sel).value = val; store.set(key, val); }
+  }
+  await applyProviderToField($('author'), $('authorProvider').value);
+  await applyProviderToField($('critic'), $('criticProvider').value);
+  if (m.rubric !== undefined || c.fallback !== undefined) saveSettings({ ...loadSettings(), rubric: m.rubric || '', fallback: c.fallback || '' });
+  runAbandoned = true;
+  show('result', false); show('run', false); show('setup');
+  refreshVisionHints(); updateCostEstimate();
+  const att = Array.isArray(m.attachments) && m.attachments.length ? ` Re-attach if needed: ${m.attachments.slice(0, 5).join(', ')}${m.attachments.length > 5 ? '…' : ''}.` : '';
+  toast('Setup restored — edit anything, then start the volley.' + att, att ? 9000 : 5000);
+  $('idea').focus();
+}
+function updateResultButtons() {
+  $('btnRerun').hidden = !currentHistoryName;
+  $('btnCompare').hidden = !currentHistoryName;
+}
+$('btnRerun').onclick = () => { if (currentHistoryName) rerunFromHistory(currentHistoryName); };
+$('btnCompare').onclick = () => { if (currentHistoryName) runHistoryAction('compare', historyTarget(currentHistoryName)); };
+
+// ---- Cost estimate shown before you start: range from "approved after round 1" to "every round runs" ----
+// Full catalogue (including paid models) loads in the background, purely for price estimates.
+let MODEL_PRICE_ROWS = null;
+pv.models({ all: true }).then((r) => { MODEL_PRICE_ROWS = r || null; updateCostEstimate(); }).catch(() => {});
+function pricesOf(provider, modelId) {
+  if (provider === 'ollama') return { free: true };
+  if (provider !== 'openrouter') return null; // subscription CLIs / OpenAI list prices aren't in the catalogue
+  const row = (MODEL_PRICE_ROWS || MODEL_ROWS).find((r) => r.id === modelId);
+  if (!row) return null;
+  return row.isFree ? { free: true } : { inPerM: row.inPerM, outPerM: row.outPerM };
+}
+function attachmentChars() {
+  let n = 0;
+  for (const f of pendingFolders) if (f.status === 'ready') n += f.files.reduce((x, y) => x + y.text.length, 0);
+  for (const a of pendingAttachments) if (!IMAGE_EXT.has(extOf(a.file.name))) n += a.file.size;
+  return n;
+}
+function updateCostEstimate() {
+  const el = $('costEstimate'); if (!el) return;
+  const ap = $('authorProvider').value || 'openrouter', cp = $('criticProvider').value || 'openrouter';
+  const rounds = Math.max(1, Math.min(8, +$('rounds').value || 3));
+  const subs = [ap, cp].some((p) => p === 'anthropic' || p === 'google');
+  const est = estimateRunCost({ ideaChars: $('idea').value.length, attachChars: attachmentChars(), rounds, writer: pricesOf(ap, $('author').value.trim()), reviewer: pricesOf(cp, $('critic').value.trim()) });
+  if (est) {
+    el.textContent = est.high === 0 ? 'Estimated cost: free with these models.'
+      : `Estimated cost: typically ${formatMoney(est.low)}–${formatMoney(est.high)} (1 to ${rounds} round${rounds === 1 ? '' : 's'}; images not counted).`;
+  } else if (subs) el.textContent = 'Subscription / account-based provider selected — cost estimate unavailable (uses your plan or free allowance).';
+  else el.textContent = '';
+}
+['idea', 'author', 'critic', 'rounds'].forEach((id) => $(id).addEventListener('input', updateCostEstimate));
+['authorProvider', 'criticProvider'].forEach((id) => $(id).addEventListener('change', updateCostEstimate));
+setTimeout(updateCostEstimate, 800); setInterval(updateCostEstimate, 4000); // catalogue loads async; also follows attachments
 
 // animated background
 const c = $('bgCanvas'); const ctx = c.getContext('2d');
@@ -2233,6 +2324,7 @@ pv.onEvent(async (ev) => {
       $('outcomeTag').value = '';
       showIdeaRecap(ev.idea, ev.file ? `Saved to ${ev.file}` : 'Stopped early — this is the latest draft.');
       show('run', false); show('result');
+      updateResultButtons();
       break;
     case 'error':
       streaming('author', false); streaming('critic', false); show('notesBox', false);

@@ -6,7 +6,8 @@ const { JSDOM } = require('jsdom');
 
 const ROOT = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
-const appJs = fs.readFileSync(path.join(ROOT, 'renderer', 'app.js'), 'utf8');
+const readRenderer = (f) => fs.readFileSync(path.join(ROOT, 'renderer', f), 'utf8');
+const helpersJs = readRenderer('helpers.js'), appJs = readRenderer('app.js'), compareJs = readRenderer('compare.js');
 
 const htmlNoScripts = html.replace(/<script[\s\S]*?<\/script>/g, '');
 
@@ -69,7 +70,9 @@ function makePv() {
   }
 
   try {
-    window.eval(appJs);
+    window.eval(helpersJs);
+    // One eval: top-level const/let in app.js are only visible to compare.js inside the same script scope.
+    window.eval(appJs + '\n' + compareJs);
   } catch (e) {
     errors.push('eval threw: ' + e.message);
   }

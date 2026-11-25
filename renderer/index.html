@@ -30,6 +30,7 @@
   <aside class="sidebar">
     <button class="newchat" id="btnNewChat">+ New volley</button>
     <div class="side-label">History</div>
+    <input type="search" id="historySearch" class="history-search" placeholder="Search volleys, models, projects…" aria-label="Search volleys" spellcheck="false">
     <div class="history" id="history"></div>
     <div class="sidebar-footer">
       <button class="icon-btn" id="btnFolder" title="Open saved runs folder" aria-label="Open saved runs folder">📂</button>
@@ -74,6 +75,7 @@
     </div>
     <label class="check"><input type="checkbox" id="auto"> Hands-off mode (don't pause for my notes between rounds)</label>
     <div class="composer-actions"><label class="rounds-inline" title="What the volley should produce: a build prompt, or a deep, code-grounded research & execution plan">Output <select id="outputMode"><option value="prompt">Prompt</option><option value="deep-plan">Code plan</option></select></label><label class="rounds-inline" title="How many Writer ↔ Reviewer exchanges before it stops">Max rounds <input id="rounds" type="number" min="1" max="8" value="3"></label><button class="big" id="btnStart">Start the volley</button> <span class="hint">or press Ctrl+Enter</span></div>
+    <p class="hint cost-estimate" id="costEstimate" aria-live="polite"></p>
   </section>
 
   <section id="run" class="hidden">
@@ -123,7 +125,7 @@
       <div class="row"><button class="ghost" id="btnVariantGo">Generate variant</button><button class="ghost" id="btnVariantCancel">Cancel</button></div>
     </div>
     <div class="utility-output hidden" id="utilityOutput"><div class="utility-head"><strong id="utilityTitle"></strong><button class="icon-btn" id="utilityClose" title="Close">✕</button></div><pre id="utilityText"></pre></div>
-    <div class="row"><button class="big" id="btnCopy">📋 Copy prompt</button><button class="ghost" id="btnCopyMd" title="Copy with a Markdown header (date, models, rounds)">📄 Copy as .md</button><button class="ghost" id="btnBack">✏ Tweak my idea &amp; re-run</button><button class="ghost" id="btnAgain">Start a new one</button></div>
+    <div class="row"><button class="big" id="btnCopy">📋 Copy prompt</button><button class="ghost" id="btnCopyMd" title="Copy with a Markdown header (date, models, rounds)">📄 Copy as .md</button><button class="ghost" id="btnRerun" title="Reload this volley's idea, models, rounds and settings into the composer" hidden>🔁 Re-run with same setup</button><button class="ghost" id="btnCompare" title="Compare this volley with another one side by side" hidden>⚖ Compare…</button><button class="ghost" id="btnBack">✏ Tweak my idea &amp; re-run</button><button class="ghost" id="btnAgain">Start a new one</button></div>
     <p class="hint" id="savedAt"></p>
     </div>
   </section>
@@ -234,6 +236,8 @@
 <div class="context-menu hidden" id="contextMenu">
   <div class="menu-item" data-action="rename" data-scope="run">Rename</div>
   <div class="menu-item" data-action="move" data-scope="run">Move to folder…</div>
+  <div class="menu-item" data-action="rerun" data-scope="run">Re-run with same setup</div>
+  <div class="menu-item" data-action="compare" data-scope="run">Compare with…</div>
   <div class="menu-item danger" data-action="delete" data-scope="run">Delete</div>
   <div class="menu-item" data-action="rename-project" data-scope="project">Rename folder</div>
   <div class="menu-item danger" data-action="delete-project" data-scope="project">Delete folder</div>
@@ -248,5 +252,16 @@
   <label id="promptField"><span id="promptLabel">Name</span><input id="promptInput" type="text" maxlength="120" spellcheck="false"></label>
   <div class="row"><button class="big" id="promptOk">Save</button><button class="ghost" id="promptCancel">Cancel</button></div>
 </div></div>
+<div id="compareModal" class="modal hidden"><div class="card compare-card">
+  <div class="compare-head"><h2 id="compareTitle">Compare volleys</h2><button class="icon-btn" id="compareClose" title="Close" aria-label="Close comparison">✕</button></div>
+  <p class="hint" id="compareSummary"></p>
+  <label class="check"><input type="checkbox" id="compareDiff" checked> Highlight what changed (right side vs left)</label>
+  <div class="compare-grid">
+    <div class="compare-col"><h3 id="compareHeadA"></h3><div class="compare-meta" id="compareMetaA"></div><pre id="compareTextA"></pre></div>
+    <div class="compare-col"><h3 id="compareHeadB"></h3><div class="compare-meta" id="compareMetaB"></div><pre id="compareTextB"></pre></div>
+  </div>
+</div></div>
+<script src="helpers.js"></script>
 <script src="app.js"></script>
+<script src="compare.js"></script>
 </body></html>
