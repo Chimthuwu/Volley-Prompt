@@ -123,6 +123,15 @@ test('failed push resolves false and is retried on the next markChanged', async 
   assert.equal(h.pushed.length, 0);
 });
 
+test('history section is trimmed to maxHistory entries before push (A4 size caps)', async () => {
+  const h = makeHarness({ debounceMs: 1 });
+  h.state.history = Array.from({ length: 250 }, (_, i) => ({ n: i })); // engine keeps section order
+  await h.engine.start();
+  const sent = h.pushed[0];
+  assert.equal(sent.sections.history.data.length, 200);
+  assert.deepEqual(sent.sections.history.data[0], { n: 0 }, 'newest-first order is preserved by the slice');
+});
+
 test('stop() cancels a pending debounce and blocks further pushes', async () => {
   const h = makeHarness({ debounceMs: 10 });
   await h.engine.start();

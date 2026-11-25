@@ -44,16 +44,16 @@ Everything stays on the account the site is already deployed to. One `wrangler`,
 - [x] `generatePairSecret()`: 128-bit random → **URL-safe base64** (22 chars, no padding) — implemented in `lib/pairing.js` with `blobIdFor()` (sha256 hex) and PBKDF2/AES-GCM profile crypto; 5 node tests cover shape, derivation, roundtrip, tamper rejection. Added 2026-11-26.
 - [ ] Copy/paste-first is DONE (Settings > Sync between devices: selectable field + Copy code, one paste box on both ends). QR display deferred — see Inbox (needs a small QR encoder; adding a dependency is a review-me choice).
 - [x] `derivedKey = PBKDF2/Argon2(secret)` client-side; `blobId = sha256(secret)` — `deriveProfileKey()` / `blobIdFor()` in lib/pairing.js (pure WebCrypto, works in Electron, browsers and node).
-- [ ] Desktop "Pair" → shows the secret; Web paste box → both persist and derive the same `blobId` (lib/pairing.js). The "read/write each other's state" part = the A4 client wiring (pull/push) — the crypto and server are ready and tested, the app-state collection/debounce is the remaining step.
+- [x] Desktop "Pair" → shows the secret; Web paste box → both persist and derive the same `blobId` (lib/pairing.js). The "read/write each other's state" part = the A4 client wiring (pull/push) — DONE 2026-11-26: engine loop + both transports wired (commit ab09917).
 - [x] Persist secret locally on pair (desktop: `pairing.bin` beside `key.bin` under safeStorage; web: `localStorage` — weaker than the keychain, but the **payload is E2E-encrypted**, so the threat is a leaked secret, not a server breach).
 - [x] Server stores **opaque encrypted blobs** keyed by `blobId` + updatedAt only — functions/api/sync/[[path]].js (A2, tested).
-- [ ] Acceptance: pair desktop↔web with one code; change a preset on one, reload the other, it's there; unpair clears the local secret (orphaned server blob is fine).
+- [!] Acceptance: pair desktop↔web with one code; change a preset on one, reload the other, it's there; unpair clears the local secret (orphaned server blob is fine). — automated full-stack equivalent PASSES (test/sync-acceptance.test.js: real crypto + real Pages Function + mock KV, presets cross devices, unpair stops syncing); the LIVE device pass needs the deployed KV namespace (owner wrangler auth, same gate as A2's KV id + site deploy).
 
 ### A4. Sync protocol
 - [x] Payload = one JSON "profile" with TOP-LEVEL SECTIONS (settings, presets, modelPairs, composer, theme, history) — `lib/sync-client.js` buildProfile/readProfile; history metadata + prompts, never attachment contents.
-- [ ] `pull()` on open/focus; `push()` debounced ~2 s after change.
+- [x] `pull()` on open/focus; `push()` debounced ~2 s after change. — DONE 2026-11-26: lib/sync-engine.js (restamps only sections whose data changed, first-pull adopts the paired profile wholesale, min 5 s pull gap) wired in renderer/app.js (store.set wrapper + focus/visibilitychange) with transports pv.syncPull/syncPush in preload.js + main.js (desktop, VP_SYNC_URL overridable) and site/pv.js (web, same-origin). Run-history section not collected yet (desktop disk vs web localStorage) — its own task.
 - [x] **Conflict rule:** last-write-wins **per top-level section** — `mergeProfile()` in lib/sync-client.js; a convergence test proves two devices merging in opposite orders reach identical state. (CRDT is overkill for two devices.)
-- [ ] Size caps: server enforces ≤ 1 MB (413) and `trimHistory()` keeps the newest N — **R2 for oversized run bodies still to do** (later; needs an R2 bucket, owner-gated like the KV id).
+- [!] Size caps: server enforces ≤ 1 MB (413) and `trimHistory()` keeps the newest N — the cap + newest-200 history trim BEFORE push are DONE (lib/sync-engine.js maxHistory, tested); **R2 for oversized run bodies still to do** (later; needs an R2 bucket, owner-gated like the KV id).
 - [x] Rate-limit `/api/sync` per `blobId` (the only "auth") — 30 PUT/min, best-effort KV counters, tested.
 
 ### A5. Google login (later — same table)
