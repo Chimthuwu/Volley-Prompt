@@ -17,7 +17,12 @@ providerModule.init(deps);
 
 (async () => {
   const all = providerModule.getAllProviders();
-  assert.strictEqual(all.length, 5, 'expected 5 providers');
+  assert.strictEqual(all.length, 6, 'expected 6 providers');
+
+  const og = providerModule.getProvider('opencode-go');
+  assert.strictEqual(og.id, 'opencode-go', 'opencode-go is registered (not the openrouter fallback)');
+  assert.strictEqual((await og.getStatus()).connected, false, 'opencode-go not connected without a key');
+  assert.ok((await og.getModels()).some((m) => m.id === 'hy4-flash-free' && m.isFree), 'opencode-go lists a free model from its fallback list');
 
   const or = providerModule.getProvider('openrouter');
   const orModels = await or.getModels();
