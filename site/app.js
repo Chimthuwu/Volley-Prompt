@@ -1170,6 +1170,7 @@ const VPS = () => window.VPScaffold;
 let scaffoldRunning = false;
 let scaffoldManifest = [];
 let scaffoldDir = '';
+let scaffoldZipMode = false; // destination can't be picked here → confirm becomes "download .zip"
 function currentScaffoldCfg() {
   return {
     authorModel: ($('author').value || '').trim(),
@@ -1201,9 +1202,11 @@ function renderScaffoldFiles(manifest) {
 }
 function showScaffoldPreview(manifest) {
   scaffoldManifest = manifest;
+  scaffoldZipMode = false;
   $('scaffoldSummary').textContent = `About to create ${manifest.length} files.`;
   renderScaffoldFiles(manifest);
   $('scaffoldDir').textContent = scaffoldDir ? `Destination: ${scaffoldDir}` : 'No destination picked yet.';
+  $('scaffoldConfirm').textContent = '✓ Write files';
   $('scaffoldConfirm').disabled = !scaffoldDir;
   show('scaffoldModal', true);
 }
@@ -1259,18 +1262,39 @@ $('scaffoldPick').onclick = async () => {
   const r = await pv.scaffoldPickDir();
   if (r && r.ok) {
     scaffoldDir = r.dir;
+    scaffoldZipMode = false;
     $('scaffoldDir').textContent = `Destination: ${scaffoldDir}`;
+    $('scaffoldConfirm').textContent = '✓ Write files';
     $('scaffoldConfirm').disabled = false;
     $('scaffoldNote').textContent = '';
   } else if (r && r.unsupported) {
-    $('scaffoldNote').textContent = r.message || 'This environment cannot write folders.';
-    toast('This browser cannot write folders — use the desktop app.', 6000);
+    // No folder picker here (todo L88 fallback): offer the .zip download instead.
+    scaffoldZipMode = true;
+    $('scaffoldDir').textContent = 'No folder access in this browser — the scaffold comes as a .zip.';
+    $('scaffoldConfirm').textContent = '⬇ Download .zip';
+    $('scaffoldConfirm').disabled = false;
+    $('scaffoldNote').textContent = r.message || 'This environment cannot write folders; the files arrive as a zip.';
   }
 };
 $('scaffoldConfirm').onclick = async () => {
-  if (!scaffoldDir && !scaffoldManifest.length) return;
+  if (!scaffoldManifest.length) return;
   $('scaffoldConfirm').disabled = true;
   try {
+    if (scaffoldZipMode) {
+      const r = await pv.scaffoldExportZip({ manifest: scaffoldManifest });
+      if (r && r.ok) {
+        show('scaffoldModal', false);
+        show('utilityOutput');
+        $('utilityTitle').textContent = 'Scaffold · zip exported';
+        $('utilityText').textContent = r.path ? `Saved to ${r.path}` : (r.message || 'Download started — unzip it anywhere and open todo.md.');
+        toast(r.message || 'Scaffold zip download started.', 6000);
+      } else {
+        $('scaffoldConfirm').disabled = false;
+        toast(r && r.message ? r.message : 'Could not export the zip.', 8000);
+      }
+      return;
+    }
+    if (!scaffoldDir) return;
     let r = await pv.scaffoldWrite({ dir: scaffoldDir, manifest: scaffoldManifest });
     if (r && r.needsMergePrompt) {
       // Guardrail L91: never overwrite a non-empty directory without an explicit merge.

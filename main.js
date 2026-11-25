@@ -772,6 +772,23 @@ ipcMain.handle('scaffold:pickDir', async () => {
   return { ok: true, dir: res.filePaths[0] };
 });
 
+// Zip export (todo B2 L88): the same contract as the web fallback — the manifest becomes a
+// standard .zip. Desktop writes it next to the user's downloads and reveals it.
+const zip = require('./lib/zip.js');
+ipcMain.handle('scaffold:exportZip', async (_e, cfg) => {
+  try {
+    const bytes = zip.buildZip(cfg.manifest || []);
+    let dir = app.getPath('downloads');
+    try { fs.mkdirSync(dir, { recursive: true }); } catch { dir = app.getPath('userData'); }
+    const target = path.join(dir, 'volleyprompt-scaffold.zip');
+    fs.writeFileSync(target, Buffer.from(bytes));
+    shell.showItemInFolder(target);
+    return { ok: true, path: target, message: `Zip saved: ${target}` };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
 ipcMain.handle('run:start', async (_e, cfg) => {
   if (current) return;
   const send = (ev) => win && !win.isDestroyed() && win.webContents.send('run:event', ev);

@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('pv', {
   // Scaffold mode (todo B2): the renderer drives the cycle loop; main.js talks to the
   // provider with the scaffold systems and (after confirm) writes the manifest to disk.
   scaffoldCall: inv('scaffold:call'), scaffoldWrite: inv('scaffold:write'), scaffoldPickDir: inv('scaffold:pickDir'),
+  scaffoldExportZip: inv('scaffold:exportZip'),
   githubTokenInfo: inv('github:token:has'), saveGithubToken: inv('github:token:set'), clearGithubToken: inv('github:token:clear'), fetchGithubRepo: inv('github:repo:fetch'),
   // Multi-provider support
   providersList: inv('providers:list'), providersStatus: inv('providers:status'),

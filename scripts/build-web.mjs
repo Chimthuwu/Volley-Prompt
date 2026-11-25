@@ -105,7 +105,8 @@ html = html.replace(/(<script src="helpers\.js"><\/script>)/, '<script src="pv.j
 html = html.replace(/(<script src="pv\.js"><\/script>)/, '<script src="pairing.js"></script>\n$1');
 html = html.replace('<script src="../lib/sync-engine.js"></script>', '<script src="sync-engine.js"></script>');
 html = html.replace('<script src="../lib/scaffold.js"></script>', '<script src="scaffold.js"></script>');
-if (!html.includes('<script src="pv.js"></script>') || !html.includes('<script src="pairing.js"></script>') || !html.includes('<script src="sync-engine.js"></script>') || !html.includes('<script src="scaffold.js"></script>')) {
+html = html.replace('<script src="../lib/zip.js"></script>', '<script src="zip.js"></script>');
+if (!html.includes('<script src="pv.js"></script>') || !html.includes('<script src="pairing.js"></script>') || !html.includes('<script src="sync-engine.js"></script>') || !html.includes('<script src="scaffold.js"></script>') || !html.includes('<script src="zip.js"></script>')) {
   console.error('build-web: script injection did not apply');
   failures++;
 }
@@ -132,5 +133,6 @@ write('site/compare.js', read('renderer/compare.js'));
 write('site/pairing.js', read('lib/pairing.js'));
 write('site/sync-engine.js', read('lib/sync-engine.js'));
 write('site/scaffold.js', read('lib/scaffold.js'));
+write('site/zip.js', read('lib/zip.js'));
 write('site/index.html', html);
 console.log(`build-web: site/app.js ${appJs.length} B, site/style.css ${styleCss.length} B, site/helpers.js + compare.js + pairing.js copied, site/index.html ${html.length} B written (${ids.size} app ids checked)`);

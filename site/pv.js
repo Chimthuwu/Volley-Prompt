@@ -771,6 +771,21 @@ VERDICT: APPROVE if there are no HIGH issues left, otherwise VERDICT: REVISE.`;
         return { ok: true, written };
       } catch (e) { return { ok: false, message: e && e.message ? e.message : String(e) }; }
     },
+    // Non-Chromium fallback (todo L88): the manifest comes back as a standard .zip download.
+    scaffoldExportZip: async (cfg) => {
+      try {
+        const bytes = window.VPZip.buildZip(cfg.manifest || []);
+        const blob = new Blob([bytes], { type: 'application/zip' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'volleyprompt-scaffold.zip';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        return { ok: true, message: 'Download started: volleyprompt-scaffold.zip' };
+      } catch (e) { return { ok: false, message: e && e.message ? e.message : String(e) }; }
+    },
     // Reads one saved volley (sidebar click). Desktop: lib/runs-store.readRun; web: localStorage.
     openRun: async (name) => openRun(name),
     // Provider surfaces for the unified settings UI. The web speaks OpenRouter only; the other

@@ -28,7 +28,7 @@ const RENDERER_PV_CALLS = [
   'pv.hermesRun(',
   'pv.pairStatus(', 'pv.pairGenerate(', 'pv.pairSave(', 'pv.pairClear(',
   'pv.syncPull(', 'pv.syncPush(',
-  'pv.scaffoldCall(', 'pv.scaffoldWrite(', 'pv.scaffoldPickDir(',
+  'pv.scaffoldCall(', 'pv.scaffoldWrite(', 'pv.scaffoldPickDir(', 'pv.scaffoldExportZip(',
 ];
 
 test('renderer only calls pv methods that preload exposes', () => {
