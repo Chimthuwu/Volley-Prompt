@@ -116,7 +116,7 @@
         <span>Annotate</span>
       </button>
     </div>
-    <div class="result-tools"><button class="ghost" id="btnTestDrive">🧪 Test-drive</button><button class="ghost" id="btnVariant">↔ Variant</button><button class="ghost" id="btnReplay">⏯ Replay</button><button class="ghost" id="btnShareCard">🖼 Share card</button><button class="ghost" id="btnSendTo" title="Send this prompt to a coding agent — Cursor, Claude, VS Code, Cline or Hermes">↗ Send to ▾</button></div>
+    <div class="result-tools"><button class="ghost" id="btnTestDrive">🧪 Test-drive</button><button class="ghost" id="btnVariant">↔ Variant</button><button class="ghost" id="btnReplay">⏯ Replay</button><button class="ghost" id="btnShareCard">🖼 Share card</button><button class="ghost" id="btnScaffold" title="Scaffold mode (todo B2): the same Writer+Reviewer pair turn the approved prompt into a ready project folder with a todo.md handoff">🏗 Scaffold…</button><button class="ghost" id="btnSendTo" title="Send this prompt to a coding agent — Cursor, Claude, VS Code, Cline or Hermes">↗ Send to ▾</button></div>
     <div class="row"><label>Outcome <small>help measure prompt usefulness</small><select id="outcomeTag"><option value="">Not rated</option><option value="used">Used as-is</option><option value="edited">Edited first</option><option value="failed">Didn't work</option><option value="unused">Didn't use</option></select></label></div>
     <div class="variant-box hidden" id="variantBox">
       <label>What should the variant change? <small>optional — leave blank for an independent alternative</small>
@@ -263,6 +263,21 @@
   <div class="menu-item" data-send="hermes" title="Copy the prompt and run it through the local Hermes CLI">⚡ Hermes — run locally</div>
 </div>
 
+<!-- Scaffold mode (todo B2): preview before anything is written (guardrail L91) —
+     nothing touches disk until the user picks a destination and presses Confirm. -->
+<div id="scaffoldModal" class="modal hidden"><div class="card prompt-card" style="width:min(560px,94vw)">
+  <h2>Scaffold preview</h2>
+  <p class="hint" id="scaffoldSummary"></p>
+  <p class="hint" id="scaffoldDir">No destination picked yet.</p>
+  <div id="scaffoldFiles" class="scaffold-files" style="max-height:280px;overflow:auto;margin:.5em 0"></div>
+  <p class="hint" id="scaffoldNote"></p>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+    <button class="ghost" id="scaffoldPick">📁 Choose folder…</button>
+    <button class="ghost" id="scaffoldCancel">Cancel</button>
+    <button class="ghost" id="scaffoldConfirm" disabled>✓ Write files</button>
+  </div>
+</div></div>
+
 <!-- Prompt / confirm dialog. window.prompt() and window.confirm() are not available in
      Electron renderers, so rename and delete use this instead. -->
 <div id="promptModal" class="modal hidden"><div class="card prompt-card">
@@ -283,6 +298,7 @@
 </div></div>
 <script src="helpers.js"></script>
 <script src="../lib/sync-engine.js"></script>
+<script src="../lib/scaffold.js"></script>
 <script src="app.js"></script>
 <script src="compare.js"></script>
 </body></html>

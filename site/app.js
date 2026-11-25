@@ -1161,6 +1161,142 @@ sendMenu.addEventListener('click', async (e) => {
   await pv.openUrl({ cursor: 'cursor://', claude: 'claude://', vscode: 'vscode://', cline: 'vscode://' }[kind]);
   toast(`Prompt copied. ${label} is opening if installed — paste with Ctrl+V.`, 6000);
 });
+// ---- Scaffold mode (todo B2): the same Writer+Reviewer pair builds the project folder. ----
+// Guardrails (L91): nothing is written until the user picks a destination and confirms the
+// preview; a non-empty destination needs an explicit merge confirmation. The deterministic
+// deliverables — PROMPT.md (approved prompt verbatim) and todo.md (the cold-start handoff,
+// L87) — are injected by the app, not left to the model's whim.
+const VPS = () => window.VPScaffold;
+let scaffoldRunning = false;
+let scaffoldManifest = [];
+let scaffoldDir = '';
+function currentScaffoldCfg() {
+  return {
+    authorModel: ($('author').value || '').trim(),
+    criticModel: ($('critic').value || '').trim(),
+    authorProvider: $('authorProvider')?.value || 'openrouter',
+    criticProvider: $('criticProvider')?.value || 'openrouter',
+    cycles: Math.max(1, Math.min(8, Number($('rounds').value) || 3)),
+    idea: store.get('idea', ''),
+  };
+}
+function ensureHandoffFiles(manifest, prompt, idea, cycles) {
+  const cfg = currentScaffoldCfg();
+  const keep = manifest.filter((f) => f.path !== 'PROMPT.md' && f.path !== 'todo.md');
+  keep.push({ path: 'PROMPT.md', content: prompt });
+  keep.push({ path: 'todo.md', content: VPS().buildTodoMd({ idea, prompt, cycles, manifest }) });
+  return keep;
+}
+function renderScaffoldFiles(manifest) {
+  const box = $('scaffoldFiles');
+  box.innerHTML = '';
+  for (const f of manifest) {
+    const row = document.createElement('div');
+    row.className = 'menu-item';
+    row.style.cursor = 'default';
+    const kb = (f.content.length / 1024).toFixed(1);
+    row.textContent = `${f.path} · ${kb} KB`;
+    box.appendChild(row);
+  }
+}
+function showScaffoldPreview(manifest) {
+  scaffoldManifest = manifest;
+  $('scaffoldSummary').textContent = `About to create ${manifest.length} files.`;
+  renderScaffoldFiles(manifest);
+  $('scaffoldDir').textContent = scaffoldDir ? `Destination: ${scaffoldDir}` : 'No destination picked yet.';
+  $('scaffoldConfirm').disabled = !scaffoldDir;
+  show('scaffoldModal', true);
+}
+async function runScaffold() {
+  if (scaffoldRunning) return;
+  const prompt = $('final').value;
+  if (!prompt.trim()) { toast('Approve a prompt first — Scaffold builds from the finished prompt.', 5000); return; }
+  if (!VPS()) { toast('Scaffold core is not available in this build.', 5000); return; }
+  scaffoldRunning = true;
+  const cfg = currentScaffoldCfg();
+  show('utilityOutput');
+  $('utilityTitle').textContent = 'Scaffold · starting…';
+  $('utilityText').textContent = '';
+  let manifest = [];
+  try {
+    for (let cycle = 1; cycle <= cfg.cycles; cycle++) {
+      $('utilityTitle').textContent = `Scaffold · cycle ${cycle}/${cfg.cycles} · Writer…`;
+      let res = await pv.scaffoldCall({ role: 'author', cycle, cycles: cfg.cycles, model: cfg.authorModel, provider: cfg.authorProvider, idea: cfg.idea, prompt, manifest });
+      let parsed = VPS().parseManifest(res.text);
+      if (!parsed.ok) {
+        // One structured-retry: the model gets its own parse error back and must emit
+        // ONLY the JSON array this time.
+        $('utilityTitle').textContent = `Scaffold · cycle ${cycle}/${cfg.cycles} · Writer (retry: bad manifest)…`;
+        res = await pv.scaffoldCall({ role: 'author', cycle, cycles: cfg.cycles, model: cfg.authorModel, provider: cfg.authorProvider, idea: cfg.idea, prompt, manifest, feedback: `Your previous reply was not a valid manifest: ${parsed.error}. Output ONLY the JSON array, nothing else.` });
+        parsed = VPS().parseManifest(res.text);
+      }
+      if (!parsed.ok) throw new Error(parsed.error);
+      manifest = parsed.manifest;
+      $('utilityTitle').textContent = `Scaffold · cycle ${cycle}/${cfg.cycles} · Reviewer…`;
+      const review = await pv.scaffoldCall({ role: 'critic', cycle, cycles: cfg.cycles, model: cfg.criticModel, provider: cfg.criticProvider, prompt, manifest });
+      const verdict = VPS().verdictOf(review.text);
+      $('utilityText').textContent = review.text;
+      $('utilityTitle').textContent = `Scaffold · cycle ${cycle}/${cfg.cycles} · ${verdict.verdict}${verdict.score != null ? ` ${verdict.score}/100` : ''}`;
+      if (verdict.verdict === 'REVISE') {
+        // Same loop as the prose volley: one revision pass with the reviewer's text.
+        const fix = await pv.scaffoldCall({ role: 'author', cycle, cycles: cfg.cycles, model: cfg.authorModel, provider: cfg.authorProvider, idea: cfg.idea, prompt, manifest, feedback: review.text });
+        const fixed = VPS().parseManifest(fix.text);
+        if (fixed.ok) manifest = fixed.manifest;
+      }
+    }
+    showScaffoldPreview(ensureHandoffFiles(manifest, prompt, cfg.idea, cfg.cycles));
+  } catch (e) {
+    $('utilityTitle').textContent = 'Scaffold · failed';
+    $('utilityText').textContent = e.message || String(e);
+    toast(`Scaffold failed: ${e.message || e}`, 8000);
+  } finally {
+    scaffoldRunning = false;
+  }
+}
+$('btnScaffold').onclick = () => runScaffold();
+$('scaffoldCancel').onclick = () => show('scaffoldModal', false);
+$('scaffoldPick').onclick = async () => {
+  const r = await pv.scaffoldPickDir();
+  if (r && r.ok) {
+    scaffoldDir = r.dir;
+    $('scaffoldDir').textContent = `Destination: ${scaffoldDir}`;
+    $('scaffoldConfirm').disabled = false;
+    $('scaffoldNote').textContent = '';
+  } else if (r && r.unsupported) {
+    $('scaffoldNote').textContent = r.message || 'This environment cannot write folders.';
+    toast('This browser cannot write folders — use the desktop app.', 6000);
+  }
+};
+$('scaffoldConfirm').onclick = async () => {
+  if (!scaffoldDir && !scaffoldManifest.length) return;
+  $('scaffoldConfirm').disabled = true;
+  try {
+    let r = await pv.scaffoldWrite({ dir: scaffoldDir, manifest: scaffoldManifest });
+    if (r && r.needsMergePrompt) {
+      // Guardrail L91: never overwrite a non-empty directory without an explicit merge.
+      const ok = await askConfirm({
+        title: 'Folder is not empty',
+        message: `"${scaffoldDir}" already has files. Write the scaffold into it anyway (same-name files are overwritten, everything else is kept)?`,
+        okLabel: 'Merge into it',
+      });
+      if (!ok) { $('scaffoldConfirm').disabled = false; return; }
+      r = await pv.scaffoldWrite({ dir: scaffoldDir, manifest: scaffoldManifest, overwrite: true });
+    }
+    if (r && r.ok) {
+      show('scaffoldModal', false);
+      show('utilityOutput');
+      $('utilityTitle').textContent = `Scaffold · done — ${r.written} files in ${scaffoldDir}`;
+      $('utilityText').textContent = 'Open the folder in your IDE and start at milestone 1 in todo.md.';
+      toast(`Scaffold written: ${r.written} files.`, 6000);
+    } else {
+      $('scaffoldConfirm').disabled = false;
+      toast(r && r.message ? r.message : 'Could not write the scaffold.', 8000);
+    }
+  } catch (e) {
+    $('scaffoldConfirm').disabled = false;
+    toast(e.message || String(e), 8000);
+  }
+};
 function replayHtml() {
   const title = escapeHtml(lastRunMeta?.project || 'VolleyPrompt replay');
   const snapshots = JSON.stringify(runSnapshots).replace(/</g, '\\u003c');

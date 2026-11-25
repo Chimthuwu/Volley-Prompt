@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('pv', {
   // Sync transport (todo A4): crypto + HTTPS to the site API happen in the main process;
   // the renderer just hands over / receives the plain profile object.
   syncPull: inv('sync:pull'), syncPush: inv('sync:push'),
+  // Scaffold mode (todo B2): the renderer drives the cycle loop; main.js talks to the
+  // provider with the scaffold systems and (after confirm) writes the manifest to disk.
+  scaffoldCall: inv('scaffold:call'), scaffoldWrite: inv('scaffold:write'), scaffoldPickDir: inv('scaffold:pickDir'),
   githubTokenInfo: inv('github:token:has'), saveGithubToken: inv('github:token:set'), clearGithubToken: inv('github:token:clear'), fetchGithubRepo: inv('github:repo:fetch'),
   // Multi-provider support
   providersList: inv('providers:list'), providersStatus: inv('providers:status'),

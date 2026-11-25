@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, shell, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell, clipboard, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -691,6 +691,85 @@ ipcMain.handle('utility:call', async (_e, cfg) => {
   });
   if (!text) throw new Error('The model returned nothing. Try a different model.');
   return { text, usage: null, elapsedMs: Date.now() - startedAt };
+});
+
+// ---- Scaffold mode (todo B2): the same Writer+Reviewer pair builds a project folder. ----
+// The renderer drives the cycle loop (lib/scaffold.js is the shared core); this side only
+// does the two things a renderer cannot: talk to the provider with the scaffold systems,
+// and write the confirmed manifest to the user-picked folder with path re-validation.
+const scaffold = require('./lib/scaffold.js');
+
+ipcMain.handle('scaffold:call', async (_e, cfg) => {
+  if (!cfg || (cfg.role !== 'author' && cfg.role !== 'critic')) throw new Error('Invalid scaffold role.');
+  const model = String(cfg.model || '').slice(0, 200);
+  if (!model) throw new Error('Choose a model first.');
+  const prompt = typeof cfg.prompt === 'string' ? cfg.prompt.slice(0, 200000) : '';
+  if (!prompt.trim()) throw new Error('No approved prompt to scaffold from.');
+  const cycle = Math.max(1, Math.min(8, cfg.cycle | 0 || 1));
+  const cycles = Math.max(1, Math.min(8, cfg.cycles | 0 || 3));
+  const idea = typeof cfg.idea === 'string' ? cfg.idea.slice(0, 200000) : '';
+  const manifest = Array.isArray(cfg.manifest) ? cfg.manifest : [];
+  const feedback = typeof cfg.feedback === 'string' ? cfg.feedback.slice(0, 100000) : '';
+  const provId = cfg.provider || 'openrouter';
+  const provider = providerModule.getProvider(provId);
+  const st = await provider.getStatus();
+  if (!st.connected) throw new Error(`Provider "${provider.name}" is not connected. Open Settings and add credentials for it.`);
+  const system = cfg.role === 'author' ? scaffold.SCAFFOLD_AUTHOR_SYSTEM : scaffold.SCAFFOLD_CRITIC_SYSTEM;
+  let userContent = cfg.role === 'author'
+    ? scaffold.authorUserContent({ cycle, cycles, idea, prompt, manifest })
+    : scaffold.criticUserContent({ cycle, cycles, prompt, manifest });
+  // A REVISE verdict sends the reviewer's full text back to the Writer for one revision pass
+  // (same loop the prose volley uses — only "what a draft is" changed).
+  if (cfg.role === 'author' && feedback) userContent += `\n\nREVIEWER FEEDBACK (apply the fixes, keep everything that passed):\n${feedback}`;
+  const startedAt = Date.now();
+  let text = '';
+  await provider.chat({
+    model, system,
+    messages: [{ role: 'user', content: userContent }],
+    signal: undefined,
+    onDelta: (d) => { text += d; },
+    onUsage: () => {},
+  });
+  if (!text) throw new Error('The model returned nothing. Try a different model.');
+  return { text, elapsedMs: Date.now() - startedAt };
+});
+
+ipcMain.handle('scaffold:write', async (_e, cfg) => {
+  if (!cfg || typeof cfg.dir !== 'string' || !cfg.dir.trim()) return { ok: false, message: 'No destination folder chosen.' };
+  // Re-validate through the shared core: the renderer passes the parsed manifest, but the
+  // writer trusts nothing it did not validate itself.
+  const parsed = scaffold.parseManifest(JSON.stringify(cfg.manifest || []));
+  if (!parsed.ok) return { ok: false, message: parsed.error };
+  const dir = path.resolve(cfg.dir.trim());
+  let existing = [];
+  try { existing = fs.readdirSync(dir); } catch { /* ENOENT is fine — we create it */ }
+  if (existing.length && !cfg.overwrite) {
+    return { ok: false, needsMergePrompt: true, message: 'That folder is not empty.' };
+  }
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    let written = 0;
+    for (const file of parsed.manifest) {
+      const target = path.join(dir, ...file.path.split('/'));
+      // Belt and braces: the resolved target must stay inside the chosen directory even
+      // for symlinks smuggled into a subpath that parseManifest's ".." check cannot see.
+      if (!path.resolve(target).startsWith(dir + path.sep) && path.resolve(target) !== dir) {
+        return { ok: false, message: `Refusing to write outside the folder: ${file.path}` };
+      }
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, file.content, 'utf8');
+      written++;
+    }
+    return { ok: true, written };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+ipcMain.handle('scaffold:pickDir', async () => {
+  const res = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
+  if (res.canceled || !res.filePaths.length) return { ok: false };
+  return { ok: true, dir: res.filePaths[0] };
 });
 
 ipcMain.handle('run:start', async (_e, cfg) => {

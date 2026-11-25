@@ -13,6 +13,7 @@
   const PAIR_STORAGE = 'vp_pair_secret';
   let githubToken = '';
   let githubUsername = '';
+  let scaffoldDirHandle = null; // File System Access API destination (Chromium), todo B2
   const MAX_HISTORY = 50;
 
   const AUTHOR_SYSTEM = `You are an expert prompt engineer. The user wants a prompt they can give to an AI coding assistant to build a game or app. Write a clear, complete, well-structured prompt: goal, tech stack, core features, constraints, scope/milestones, and what 'done' looks like. Make reasonable assumptions explicit instead of leaving gaps. When given critic feedback, revise accordingly and keep what already works. Output ONLY the prompt itself, no preamble or commentary.`;
@@ -723,6 +724,52 @@ VERDICT: APPROVE if there are no HIGH issues left, otherwise VERDICT: REVISE.`;
       } catch (e) {
         return { ok: false, code: 'error', message: e && e.message ? e.message : String(e) };
       }
+    },
+    // Scaffold mode (todo B2), web half: the loop itself runs in the shared renderer code;
+    // here: one-shot model calls with the scaffold systems, and (Chromium only) writing the
+    // confirmed manifest into a user-picked directory via the File System Access API.
+    scaffoldCall: async (cfg) => {
+      const sc = window.VPScaffold;
+      const key = loadKey();
+      if (!key) throw new Error('No OpenRouter key — add one in Settings.');
+      if (!cfg || (cfg.role !== 'author' && cfg.role !== 'critic')) throw new Error('Invalid scaffold role.');
+      const system = cfg.role === 'author' ? sc.SCAFFOLD_AUTHOR_SYSTEM : sc.SCAFFOLD_CRITIC_SYSTEM;
+      let userContent = cfg.role === 'author'
+        ? sc.authorUserContent({ cycle: cfg.cycle, cycles: cfg.cycles, idea: cfg.idea, prompt: cfg.prompt, manifest: cfg.manifest })
+        : sc.criticUserContent({ cycle: cfg.cycle, cycles: cfg.cycles, prompt: cfg.prompt, manifest: cfg.manifest });
+      if (cfg.role === 'author' && cfg.feedback) userContent += `\n\nREVIEWER FEEDBACK (apply the fixes, keep everything that passed):\n${cfg.feedback}`;
+      const text = await stream(key, cfg.model, system, [{ role: 'user', content: userContent }], undefined, () => {}, null);
+      return { text };
+    },
+    scaffoldPickDir: async () => {
+      if (!window.showDirectoryPicker) {
+        return { ok: false, unsupported: true, message: 'This browser cannot write folders — use the desktop app for a real folder, or export the files.' };
+      }
+      try { scaffoldDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' }); return { ok: true, dir: scaffoldDirHandle.name }; }
+      catch { return { ok: false }; } // user cancelled
+    },
+    scaffoldWrite: async (cfg) => {
+      const sc = window.VPScaffold;
+      if (!scaffoldDirHandle) return { ok: false, message: 'Pick a destination folder first.' };
+      const parsed = sc.parseManifest(JSON.stringify(cfg.manifest || []));
+      if (!parsed.ok) return { ok: false, message: parsed.error };
+      try {
+        const names = [];
+        for await (const entry of scaffoldDirHandle.values()) names.push(entry.name);
+        if (names.length && !cfg.overwrite) return { ok: false, needsMergePrompt: true, message: 'That folder is not empty.' };
+        let written = 0;
+        for (const file of parsed.manifest) {
+          const parts = file.path.split('/');
+          let dir = scaffoldDirHandle;
+          for (let i = 0; i < parts.length - 1; i++) dir = await dir.getDirectoryHandle(parts[i], { create: true });
+          const fh = await dir.getFileHandle(parts[parts.length - 1], { create: true });
+          const w = await fh.createWritable();
+          await w.write(file.content);
+          await w.close();
+          written++;
+        }
+        return { ok: true, written };
+      } catch (e) { return { ok: false, message: e && e.message ? e.message : String(e) }; }
     },
     // Reads one saved volley (sidebar click). Desktop: lib/runs-store.readRun; web: localStorage.
     openRun: async (name) => openRun(name),
