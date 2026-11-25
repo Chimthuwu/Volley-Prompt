@@ -68,7 +68,7 @@ app.whenReady().then(async () => {
                items: [...m.querySelectorAll('.menu-item')].filter(e=>!e.classList.contains('hidden')).map(e=>e.dataset.action) }; })()
   `);
   check('menu visible', menuState.visible === true && menuState.opacity === '1' && menuState.pointerEvents === 'auto', JSON.stringify(menuState));
-  check('run-scoped items only', JSON.stringify(menuState.items) === JSON.stringify(['rename','move','delete']), JSON.stringify(menuState.items));
+  check('run-scoped items only', JSON.stringify(menuState.items) === JSON.stringify(['rename','move','rerun','compare','delete']), JSON.stringify(menuState.items));
 
   await js(`document.querySelector('#contextMenu .menu-item[data-action="rename"]').click()`);
   await new Promise((r) => setTimeout(r, 250));

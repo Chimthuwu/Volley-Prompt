@@ -1,3 +1,4 @@
+const { escapeHtml, extOf, formatSize, diffOps, rankContextFiles, parseStamp, filterRuns, estimateRunCost, formatMoney } = window.VPH;
 const $ = (id) => document.getElementById(id);
 const show = (id, on = true) => $(id).classList.toggle('hidden', !on);
 const store = {
@@ -116,7 +117,9 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !themePa
   $('outputMode').value = store.get('outputMode', 'prompt') === 'deep-plan' ? 'deep-plan' : 'prompt';
   $('idea').value = store.get('idea', '');
   $('auto').checked = store.get('auto', '0') === '1';
-  if (!(await pv.hasKey())) openModal(true);
+  const ap = store.get('authorProvider', 'openrouter');
+  const cp = store.get('criticProvider', 'openrouter');
+  if ((ap === 'openrouter' || cp === 'openrouter') && !(await pv.hasKey())) openModal(true);
   const rows = await pv.models();
   $('modelList').innerHTML = rows.map((r) => `<option value="${r.id}">`).join('');
 })();
@@ -188,6 +191,8 @@ function openSettings() {
       ? `OpenRouter key spend remaining: $${Number(remaining).toFixed(2)}${limit != null && Number.isFinite(Number(limit)) ? ` of $${Number(limit).toFixed(2)}` : ''}.`
       : `OpenRouter key usage: $${Number(d.usage || 0).toFixed(2)} used${d.is_free_tier ? ' · free tier' : ''}.`;
   }).catch(() => { $('keyUsageInfo').textContent = 'Could not load key usage.'; });
+  populateProviderSelects();
+  renderProviders();
   showSettingsPage();
 }
 // Settings is its own page (it was too cramped as a popup): hide the current view, and
@@ -217,6 +222,14 @@ $('btnSaveSettings').onclick = () => {
   // Default Writer/Reviewer models share one source of truth with the composer fields.
   if (o.writer) { store.set('author', o.writer); $('author').value = o.writer; }
   if (o.critic) { store.set('critic', o.critic); $('critic').value = o.critic; }
+  // Persist provider choices and keep the composer selects + model lists in sync.
+  store.set('authorProvider', $('setWriterProvider').value);
+  store.set('criticProvider', $('setCriticProvider').value);
+  store.set('fallbackProvider', $('setFallbackProvider').value);
+  $('authorProvider').value = $('setWriterProvider').value;
+  $('criticProvider').value = $('setCriticProvider').value;
+  applyProviderToField($('author'), $('authorProvider').value);
+  applyProviderToField($('critic'), $('criticProvider').value);
   hideSettingsPage();
   toast('Settings saved.', 4000);
 };
@@ -226,13 +239,19 @@ $('btnEditKey').onclick = () => { hideSettingsPage(); openModal(false); };
 // ---- Model autocomplete: custom, scrollable, badged. The native <input list> dropdown
 // refused to show options while the field already had text in it, and its list can't be
 // reliably scrolled — this replaces it everywhere a model id is picked. ----
-let MODEL_ROWS = [];
-let ALL_MODEL_ROWS = null;
+let MODEL_ROWS = []; // OpenRouter model catalogue (used for pricing/vision hints)
+let MODEL_ROWS_BY_INPUT = new WeakMap(); // per-input model rows (provider-aware)
+const providerOfInput = (input) => {
+  const selId = PROVIDER_PAIRS[input.id] || ({ runAuthor: 'authorProvider', runCritic: 'criticProvider' })[input.id];
+  return (selId && $(selId) && $(selId).value) || 'openrouter';
+};
 async function setupModelAutocomplete(input) {
   const list = document.createElement('div');
   list.className = 'model-ac hidden';
   document.body.appendChild(list);
   let items = [], pickIdx = -1, allModelsMode = false, freshFocus = false;
+  if (!MODEL_ROWS_BY_INPUT.has(input)) MODEL_ROWS_BY_INPUT.set(input, { rows: [], allRows: null });
+  const rowsFor = () => MODEL_ROWS_BY_INPUT.get(input);
 
   const close = () => { list.classList.add('hidden'); pickIdx = -1; };
   const choose = (row) => {
@@ -244,7 +263,9 @@ async function setupModelAutocomplete(input) {
     // Focusing a field that already holds a model id shows the whole list; only actual
     // typing filters it. (Otherwise the field filtered down to its own value and looked empty.)
     const q = freshFocus ? '' : input.value.trim().toLowerCase();
-    const source = allModelsMode && ALL_MODEL_ROWS ? ALL_MODEL_ROWS : MODEL_ROWS;
+    const isOpenRouter = providerOfInput(input) === 'openrouter';
+    if (!isOpenRouter) allModelsMode = false;
+    const source = allModelsMode && rowsFor().allRows ? rowsFor().allRows : rowsFor().rows;
     items = source.filter((row) => !q || row.id.toLowerCase().includes(q));
     if (!allModelsMode) items = items.slice(0, 300);
     pickIdx = -1;
@@ -255,19 +276,18 @@ async function setupModelAutocomplete(input) {
     more.addEventListener('mousedown', (e) => e.preventDefault());
     more.addEventListener('click', async () => {
       input.value = '';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
       if (allModelsMode) { allModelsMode = false; render(); return; }
       allModelsMode = true;
       more.disabled = true; more.textContent = 'Loading full model catalog…';
-      try { ALL_MODEL_ROWS = (await pv.models({ all: true })) || []; }
-      catch (e) { allModelsMode = false; toast('Could not load the full model list.', 6000); }
+      try { rowsFor().allRows = (await pv.models({ all: true })) || []; }
+      catch { allModelsMode = false; toast('Could not load the full model list.', 6000); }
       render();
     });
-    list.appendChild(more);
+    if (isOpenRouter) list.appendChild(more);
     if (!items.length) {
       const empty = document.createElement('div');
       empty.className = 'model-ac-empty';
-      empty.textContent = q ? 'No matching models' : 'No models available (offline?)';
+      empty.textContent = q ? 'No matching models' : (isOpenRouter ? 'No models available (offline?)' : 'No models found for this provider — check it is connected in Settings (⚙).');
       list.appendChild(empty);
       return;
     }
@@ -316,6 +336,14 @@ async function setupModelAutocomplete(input) {
     else if (e.key === 'Enter' && pickIdx >= 0) { e.preventDefault(); choose(items[pickIdx]); }
     else if (e.key === 'Escape') { e.preventDefault(); close(); }
   });
+  // Initial OpenRouter model rows (provider-aware fields swap this out later).
+  if (!window.__defaultModelRows) window.__defaultModelRows = pv.models().catch(() => []);
+  // Only OpenRouter fields start from the OpenRouter catalogue; a provider picked before this
+  // resolved must keep its own models.
+  try {
+    const defaults = (await window.__defaultModelRows) || [];
+    if (providerOfInput(input) === 'openrouter') rowsFor().rows = defaults;
+  } catch {}
 }
 (async () => {
   try { MODEL_ROWS = (await pv.models()) || []; } catch {}
@@ -336,6 +364,164 @@ async function setupModelAutocomplete(input) {
 });
 $('critic').addEventListener('input', refreshVisionHints);
 
+// ---- Multi-provider support: connect your own AI accounts; pick a provider per role. ----
+let PROVIDER_LIST = [];
+const PROVIDER_MODEL_CACHE = {};
+const PROVIDER_PAIRS = {
+  author: 'authorProvider', critic: 'criticProvider',
+  setWriter: 'setWriterProvider', setCritic: 'setCriticProvider', setFallback: 'setFallbackProvider',
+};
+
+async function loadProviderModels(id) {
+  if (PROVIDER_MODEL_CACHE[id] && PROVIDER_MODEL_CACHE[id].length) return PROVIDER_MODEL_CACHE[id];
+  try { PROVIDER_MODEL_CACHE[id] = (await pv.providerModels(id)) || []; } catch { PROVIDER_MODEL_CACHE[id] = []; }
+  return PROVIDER_MODEL_CACHE[id];
+}
+
+async function populateProviderSelects() {
+  if (!PROVIDER_LIST.length) { try { PROVIDER_LIST = (await pv.providersList()) || []; } catch { PROVIDER_LIST = []; } }
+  for (const selId of Object.values(PROVIDER_PAIRS)) {
+    const sel = $(selId);
+    if (!sel || sel.options.length) continue;
+    for (const p of PROVIDER_LIST) {
+      const o = document.createElement('option');
+      o.value = p.id; o.textContent = p.name;
+      sel.appendChild(o);
+    }
+  }
+  const set = (selId, key) => { const sel = $(selId); if (sel) sel.value = store.get(key, 'openrouter'); };
+  set('authorProvider', 'authorProvider'); set('criticProvider', 'criticProvider');
+  set('setWriterProvider', 'authorProvider'); set('setCriticProvider', 'criticProvider'); set('setFallbackProvider', 'fallbackProvider');
+  await applyAllProviderRows();
+}
+
+async function applyProviderToField(input, providerId) {
+  if (!input || !MODEL_ROWS_BY_INPUT.has(input)) return;
+  if (providerId === 'openrouter') {
+    if (!window.__defaultModelRows) window.__defaultModelRows = pv.models().catch(() => []);
+    try { MODEL_ROWS_BY_INPUT.get(input).rows = (await window.__defaultModelRows) || []; } catch {}
+  } else {
+    MODEL_ROWS_BY_INPUT.get(input).rows = await loadProviderModels(providerId);
+  }
+  MODEL_ROWS_BY_INPUT.get(input).allRows = null;
+}
+// The live-swap fields on the run screen follow the Writer / Reviewer providers.
+function syncRunInputs(authorProv, criticProv) {
+  applyProviderToField($('runAuthor'), authorProv || $('authorProvider').value || 'openrouter');
+  applyProviderToField($('runCritic'), criticProv || $('criticProvider').value || 'openrouter');
+}
+
+async function applyAllProviderRows() {
+  for (const [inputId, selId] of Object.entries(PROVIDER_PAIRS)) {
+    const input = $(inputId), sel = $(selId);
+    if (input && sel) await applyProviderToField(input, sel.value);
+  }
+  syncRunInputs();
+}
+
+function wireProviderSelect(inputId, selId, storeKey) {
+  const sel = $(selId);
+  if (!sel) return;
+  sel.addEventListener('change', async () => {
+    store.set(storeKey, sel.value);
+    const input = $(inputId);
+    await applyProviderToField(input, sel.value);
+    syncRunInputs();
+    const rows = (MODEL_ROWS_BY_INPUT.get(input) || {}).rows || [];
+    if (rows.length && input.value && !rows.some((r) => r.id === input.value)) {
+      const pick = rows.find((r) => r.isFree) || rows[0];
+      const old = input.value;
+      input.value = pick.id;
+      if (inputId === 'author' || inputId === 'critic') store.set(inputId, pick.id);
+      toast(`"${old}" isn't a ${sel.options[sel.selectedIndex]?.textContent || 'provider'} model — switched to ${pick.id}.`, 6000);
+    }
+  });
+}
+
+async function renderProviders() {
+  const list = $('providerList');
+  if (!list) return;
+  if (!PROVIDER_LIST.length) { try { PROVIDER_LIST = (await pv.providersList()) || []; } catch { PROVIDER_LIST = []; } }
+  let statuses = {};
+  try { statuses = (await pv.providersStatus()) || {}; } catch {}
+  list.textContent = '';
+  for (const p of PROVIDER_LIST) {
+    const st = statuses[p.id] || {};
+    const card = document.createElement('div');
+    card.className = 'provider-card';
+    const head = document.createElement('div');
+    head.className = 'provider-card-head';
+    const name = document.createElement('span'); name.className = 'provider-name'; name.textContent = p.name;
+    const stat = document.createElement('span');
+    stat.className = 'provider-status' + (st.connected ? ' ok' : '');
+    if (p.authType === 'cli') stat.textContent = st.installed ? '✓ CLI installed' : 'CLI not installed';
+    else stat.textContent = st.connected ? '✓ connected' : 'not connected';
+    head.append(name, stat);
+    card.appendChild(head);
+    const help = document.createElement('p');
+    help.className = 'hint';
+    if (p.authType === 'local') help.textContent = 'Runs locally — no key needed. Make sure Ollama is running with the model pulled.';
+    else if (p.authType === 'cli') help.textContent = p.installHint || 'Install this provider’s official CLI and log in, then it uses your own account.';
+    else help.textContent = 'Enter your API key (stored encrypted on this device). It is sent only to ' + p.name + '.';
+    card.appendChild(help);
+    // Billing implication, so users never discover a paid fallback by accident.
+    if (p.billingNote) {
+      const bill = document.createElement('p');
+      bill.className = 'hint provider-billing';
+      bill.textContent = p.billingNote;
+      card.appendChild(bill);
+    }
+    if (p.authType === 'api_key') {
+      const row = document.createElement('div');
+      row.className = 'provider-cred-row';
+      const inp = document.createElement('input');
+      inp.type = 'password'; inp.placeholder = 'API key'; inp.className = 'provider-key'; inp.dataset.prov = p.id;
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button'; saveBtn.className = 'ghost'; saveBtn.textContent = 'Save';
+      const msg = document.createElement('span'); msg.className = 'provider-msg'; msg.dataset.prov = p.id;
+      saveBtn.onclick = async () => {
+        const r = await pv.providerCredsSave(p.id, inp.value.trim());
+        msg.textContent = r.present ? `Saved ${r.masked}` : 'Cleared';
+        renderProviders();
+      };
+      row.append(inp, saveBtn, msg);
+      card.appendChild(row);
+    } else if (p.authType === 'cli') {
+      const cliName = (p.cliBinaries && p.cliBinaries[0]) || 'cli';
+      const login = document.createElement('p');
+      login.className = 'hint';
+      login.textContent = st.installed
+        ? 'Binary found. If a request fails, run "' + cliName + ' login" in a terminal once.'
+        : 'Not found. Install it, then run "' + cliName + ' login" in a terminal (opens your browser).';
+      card.appendChild(login);
+    }
+    const act = document.createElement('button');
+    act.type = 'button'; act.className = 'ghost';
+    act.textContent = p.authType === 'local' ? 'Check connection' : (p.authType === 'cli' ? 'Check CLI' : 'Test & connect');
+    act.onclick = async () => {
+      act.disabled = true; act.textContent = 'Checking…';
+      const r = await pv.providerConnect(p.id, '');
+      act.disabled = false; act.textContent = p.authType === 'local' ? 'Check connection' : (p.authType === 'cli' ? 'Check CLI' : 'Test & connect');
+      let m = card.querySelector('.provider-msg');
+      if (!m) { m = document.createElement('span'); m.className = 'provider-msg'; card.appendChild(m); }
+      m.textContent = r.ok ? `✓ ${r.cli ? 'CLI found' : 'connected'} · ${r.models.length} models` : '✗ ' + (r.message || r.error || 'failed');
+      renderProviders();
+    };
+    card.appendChild(act);
+    list.appendChild(card);
+  }
+}
+
+// Wire provider selects once, on load. Settings selectors share the composer's stored
+// provider preference (Writer/Reviewer/Fallback) so they stay in sync.
+const PROVIDER_STORE_KEY = {
+  author: 'authorProvider', critic: 'criticProvider',
+  setWriter: 'authorProvider', setCritic: 'criticProvider', setFallback: 'fallbackProvider',
+};
+for (const [inputId, selId] of Object.entries(PROVIDER_PAIRS)) {
+  wireProviderSelect(inputId, selId, PROVIDER_STORE_KEY[inputId]);
+}
+
 // Pulls the last N finished prompts (finals) from history for the run's reference context.
 async function collectRecentContext(n) {
   let items = [];
@@ -343,19 +529,20 @@ async function collectRecentContext(n) {
   const chunks = [];
   for (const it of items) {
     if (chunks.length >= n) break;
-    let final = it.final;
+    if (it.incomplete) continue; // stopped drafts are not "finished prompts"
+    let final = it.final, idea = it.idea;
     if (final == null && typeof pv.openRun === 'function') {
       const got = await pv.openRun(it.name).catch(() => null);
-      final = got && got.final;
+      final = got && got.final; idea = idea || (got && got.idea);
     }
     if (!final) continue;
-    chunks.push(`— Past idea: ${it.idea || it.title || '(untitled)'}\n— Past finished prompt:\n${final}`);
+    chunks.push(`— Past idea: ${idea || it.title || '(untitled)'}\n— Past finished prompt:\n${final}`);
   }
   return chunks.join('\n\n');
 }
 
 let runAbandoned = false;
-let lastRunMeta = null;
+let lastRunMeta = null; // header for "Copy as Markdown" (models, rounds, date)
 let lastRunPerM = { author: null, critic: null };
 let currentHistoryName = null;
 let runSnapshots = [];
@@ -367,8 +554,14 @@ let demoRunning = false;
 async function composeCfgFromComposer() {
   const idea = $('idea').value.trim();
   if (!idea) { toast('Type your idea first 🙂'); $('idea').focus(); return null; }
-  if (!(await pv.hasKey())) { openModal(true); return null; }
+  const authorProv = $('authorProvider').value || 'openrouter';
+  const criticProv = $('criticProvider').value || 'openrouter';
+  const needOpenRouter = authorProv === 'openrouter' || criticProv === 'openrouter';
+  if (needOpenRouter && !(await pv.hasKey())) { openModal(true); return null; }
   const cfg = { idea, author: $('author').value.trim(), critic: $('critic').value.trim(), rounds: +$('rounds').value || 3, auto: $('auto').checked };
+  cfg.authorProvider = authorProv;
+  cfg.criticProvider = criticProv;
+  cfg.fallbackProvider = store.get('fallbackProvider', '');
   cfg.outputMode = $('outputMode').value === 'deep-plan' ? 'deep-plan' : 'prompt';
   store.set('outputMode', cfg.outputMode);
   if (!cfg.author || !cfg.critic) { toast('Pick a model for both AIs.'); return null; }
@@ -422,6 +615,7 @@ function beginRun(cfg) {
   show('setup', false); show('result', false); show('notesBox', false); show('run');
   $('statusText').textContent = 'Starting…';
   $('runAuthor').value = cfg.author; $('runCritic').value = cfg.critic; $('runModelsHint').textContent = '';
+  syncRunInputs(cfg.authorProvider, cfg.criticProvider);
   if (!cfg.demo) pv.start(cfg);
 }
 
@@ -505,22 +699,14 @@ $('btnDelPair').onclick = () => {
   $('pairHelp').textContent = `Deleted “${key}”.`;
 };
 refreshPairSelect();
+populateProviderSelects();
 
 // ---- Presets: save/load a whole composer state (idea + models + settings knobs) ----
 const PRESETS_KEY = 'vpPresets';
 const STARTER_PRESETS = {
-  mvp: {
-    name: 'Focused MVP', project: 'New MVP', rounds: 2, auto: false,
-    idea: 'Build a small, polished app for [target users] that helps them [primary goal]. Start with the smallest useful version. Describe the main user flow, essential screens, data to store, important empty/error states, and clear testable completion criteria. Avoid accounts, paid services, and unnecessary dependencies unless essential.',
-  },
-  product: {
-    name: 'Distinctive product website', project: 'Product website', rounds: 3, auto: false,
-    idea: 'Design and build a distinctive, high-impact landing page for [product] aimed at [audience]. Explain the product value within the first screen, show its real workflow with [available screenshots/demos], establish a coherent visual direction, and include responsive, accessible interactions and a clear call to action. Define the sections, content, and measurable done criteria. Do not invent product capabilities or add a backend.',
-  },
-  bugfix: {
-    name: 'Focused bug fix', project: 'Bug fix', rounds: 2, auto: false,
-    idea: 'Investigate and fix this bug: [describe observed behavior]. Expected behavior: [describe expected behavior]. Reproduce it, trace the cause before editing, make the smallest safe fix, and add or update a focused regression check. Preserve existing conventions and avoid unrelated refactors. Report files changed and checks actually run.',
-  },
+  mvp: { name: 'Focused MVP', project: 'New MVP', rounds: 2, auto: false, idea: 'Build a small, polished app for [target users] that helps them [primary goal]. Start with the smallest useful version. Describe the main user flow, essential screens, data to store, important empty/error states, and clear testable completion criteria. Avoid accounts, paid services, and unnecessary dependencies unless essential.' },
+  product: { name: 'Distinctive product website', project: 'Product website', rounds: 3, auto: false, idea: 'Design and build a distinctive, high-impact landing page for [product] aimed at [audience]. Explain the product value within the first screen, show its real workflow with [available screenshots/demos], establish a coherent visual direction, and include responsive, accessible interactions and a clear call to action. Define the sections, content, and measurable done criteria. Do not invent product capabilities or add a backend.' },
+  bugfix: { name: 'Focused bug fix', project: 'Bug fix', rounds: 2, auto: false, idea: 'Investigate and fix this bug: [describe observed behavior]. Expected behavior: [describe expected behavior]. Reproduce it, trace the cause before editing, make the smallest safe fix, and add or update a focused regression check. Preserve existing conventions and avoid unrelated refactors. Report files changed and checks actually run.' },
 };
 const loadPresets = () => { try { return JSON.parse(store.get(PRESETS_KEY, '{}')) || {}; } catch { return {}; } };
 function refreshPresetSelect() {
@@ -542,7 +728,7 @@ function refreshPresetSelect() {
   sel.appendChild(savedGroup);
 }
 $('btnSavePreset').onclick = async () => {
-  // window.prompt() throws in the Electron renderer, so the shared modal is used instead.
+  // window.prompt() THROWS in Electron renderers, so the shared modal is used instead.
   const entered = await askText({ title: 'Save preset', label: 'Preset name', placeholder: 'e.g. My MVP', okLabel: 'Save' });
   if (entered === null) return;
   const name = String(entered).trim();
@@ -561,14 +747,13 @@ $('btnSavePreset').onclick = async () => {
     settings: { fallback: s.fallback || '', imgMode: s.imgMode || 'auto', recent: s.recent | 0 || 0, rubric: s.rubric || '', budget: Number(s.budget) || 0 },
   };
   store.set(PRESETS_KEY, JSON.stringify(presets));
-  refreshPresetSelect(); $('presetSelect').value = name;
+  refreshPresetSelect(); $('presetSelect').value = `saved:${name}`;
   toast(`Preset "${name}" saved.`, 4000);
 };
 $('presetSelect').onchange = () => {
   const value = $('presetSelect').value;
-  const p = value.startsWith('starter:')
-    ? STARTER_PRESETS[value.slice('starter:'.length)]
-    : value.startsWith('saved:') ? loadPresets()[value.slice('saved:'.length)] : null;
+  const p = value.startsWith('starter:') ? STARTER_PRESETS[value.slice(8)]
+    : value.startsWith('saved:') ? loadPresets()[value.slice(6)] : null;
   if (!p) return;
   $('idea').value = p.idea || ''; $('projectName').value = p.project || '';
   if (p.author) $('author').value = p.author;
@@ -576,36 +761,21 @@ $('presetSelect').onchange = () => {
   $('rounds').value = p.rounds || 3; $('auto').checked = !!p.auto;
   if (p.settings) saveSettings({ ...loadSettings(), ...p.settings });
   refreshVisionHints();
-  toast(value.startsWith('starter:') ? `Starter loaded: ${p.name}. Choose or edit the bracketed details.` : 'Saved setup loaded.', 5000);
+  toast(value.startsWith('starter:') ? `Starter loaded: ${p.name}. Edit the bracketed details.` : 'Saved setup loaded.', 5000);
 };
 $('btnDelPreset').onclick = () => {
-  const name = $('presetSelect').value;
-  const presets = loadPresets();
-  if (!name || !presets[name]) return;
+  const value = $('presetSelect').value;
+  if (!value.startsWith('saved:')) { toast('Choose one of your saved setups to delete; starter templates can’t be deleted.', 5000); return; }
+  const name = value.slice(6), presets = loadPresets();
+  if (!presets[name]) return;
   delete presets[name];
   store.set(PRESETS_KEY, JSON.stringify(presets));
   refreshPresetSelect();
-  toast(`Preset "${name}" deleted.`, 4000);
+  toast(`Saved setup "${name}" deleted.`, 4000);
 };
 refreshPresetSelect();
 
 // 2. Render a revision round as a line diff instead of a silent full rewrite.
-function escapeHtml(s) { return s.replace(/[&<>"]'/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-function diffOps(A, B) {
-  if (A.length * B.length > 160000) return null; // absurdly long prompt — plain text wins
-  const n = A.length, m = B.length;
-  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const ops = []; let i = 0, j = 0;
-  while (i < n && j < m) {
-    if (A[i] === B[j]) { ops.push({ type: 'same', text: A[i] }); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ type: 'del', text: A[i++] }); }
-    else { ops.push({ type: 'ins', text: B[j++] }); }
-  }
-  while (i < n) ops.push({ type: 'del', text: A[i++] });
-  while (j < m) ops.push({ type: 'ins', text: B[j++] });
-  return ops;
-}
 function renderLineDiff(el, oldText, newText) {
   const ops = diffOps(oldText.split('\n'), newText.split('\n'));
   if (!ops) { el.textContent = newText; return; }
@@ -683,7 +853,7 @@ $('utilityClose').onclick = () => show('utilityOutput', false);
 $('outcomeTag').onchange = () => { if (currentHistoryName && $('outcomeTag').value) pv.updateRun(currentHistoryName, { outcome: $('outcomeTag').value }); };
 
 // ---- Custom dropdowns -------------------------------------------------------
-// Browsers/Electron draw a native <select> popup themselves, in OS grey, and ignore every
+// Electron/Windows draws a native <select> popup itself, in OS grey, and ignores every
 // option colour we set. So the real <select> stays in the DOM (all existing value/onchange
 // logic keeps working, untouched) but is made invisible and driven by this styled list.
 function enhanceSelect(sel) {
@@ -768,12 +938,15 @@ $('versionSlider').oninput = () => {
   $('modelInfo').textContent = mp && mp.author ? `Models: Writer ${mp.author} · Reviewer ${mp.critic}` : $('modelInfo').textContent;
 };
 async function runUtility(kind, instruction = '') {
-  const model = MODEL_ROWS.find((r) => r.id === (lastRunMeta?.author || $('author').value)) || MODEL_ROWS.find((r) => r.isFree) || MODEL_ROWS[0];
-  if (!model) { toast('Load the model list first.', 5000); return; }
-  if (!model.isFree && !confirm(`This ${kind} helper will make an extra API call using ${model.id} (about $${(model.perM / 1e6 * $('final').value.length / 4).toFixed(3)}+ estimated). Continue?`)) return;
+  const provider = $('authorProvider')?.value || 'openrouter';
+  const modelId = (lastRunMeta?.author || $('author').value || '').trim();
+  if (!modelId) { toast('Pick a Writer model first.', 5000); return; }
+  const row = provider === 'openrouter' ? MODEL_ROWS.find((r) => r.id === modelId) : null;
+  const model = { id: modelId, isFree: !!(row && row.isFree) || provider === 'ollama' };
+  if (!model.isFree && !(await askConfirm({ title: `Run ${kind} helper?`, message: `This will make an extra API call using ${model.id}${provider === 'openrouter' ? ' (billed by OpenRouter)' : ` via ${provider}`}.`, okLabel: 'Continue' }))) return;
   show('utilityOutput'); $('utilityTitle').textContent = `${kind} · ${model.isFree ? 'FREE model' : model.id} · working…`; $('utilityText').textContent = '';
   try {
-    const result = await pv.utility({ kind, model: model.id, prompt: $('final').value, instruction: String(instruction || '').slice(0, 100000) });
+    const result = await pv.utility({ kind, model: model.id, prompt: $('final').value, instruction: String(instruction || '').slice(0, 100000), provider });
     $('utilityTitle').textContent = `${kind} · ${result.usage ? `${result.usage.total_tokens || '?'} tokens` : 'usage unavailable'} · ${(result.elapsedMs / 1000).toFixed(1)}s`;
     $('utilityText').textContent = result.text || '(empty response)';
   } catch (e) { $('utilityTitle').textContent = `${kind} failed`; $('utilityText').textContent = e.message || String(e); }
@@ -796,7 +969,7 @@ $('variantInstruction').addEventListener('keydown', (e) => {
 });
 // ---- Send to ▸ (todo B1): land the finished prompt in the chosen agent, formatting intact.
 // Every target copies first (the clipboard is the transport), then opens the agent's scheme;
-// Hermes needs the desktop app (a browser page cannot start local CLIs) and says so.
+// Hermes instead runs the prompt through the local CLI via pv.hermesRun().
 const sendMenu = $('sendMenu');
 const closeSendMenu = () => { sendMenu.classList.add('hidden'); sendMenu.classList.remove('visible'); };
 $('btnSendTo').addEventListener('click', (e) => {
@@ -823,10 +996,14 @@ sendMenu.addEventListener('click', async (e) => {
   if (!prompt.trim()) { toast('Nothing to send — the prompt is empty.', 4000); return; }
   await pv.copy(prompt);
   if (kind === 'hermes') {
+    toast('Prompt copied — handing it to the Hermes CLI…', 4000);
+    show('utilityOutput'); $('utilityTitle').textContent = 'Hermes · running the prompt locally…'; $('utilityText').textContent = '';
     try {
       const res = await pv.hermesRun(prompt);
-      toast(res.ok ? 'Hermes is running the prompt.' : (res.message || 'Hermes handoff needs the desktop app.'), 8000);
-    } catch { toast('Hermes handoff needs the desktop app. The prompt is on your clipboard.', 8000); }
+      $('utilityTitle').textContent = res.ok ? 'Hermes · done' : 'Hermes · could not run';
+      $('utilityText').textContent = res.output || res.message || '(no output)';
+      if (!res.ok) toast(res.message || 'Hermes did not return output.', 8000);
+    } catch (err) { $('utilityTitle').textContent = 'Hermes · failed'; $('utilityText').textContent = err.message || String(err); }
     return;
   }
   const label = SEND_TARGETS[kind];
@@ -834,10 +1011,39 @@ sendMenu.addEventListener('click', async (e) => {
   await pv.openUrl({ cursor: 'cursor://', claude: 'claude://', vscode: 'vscode://', cline: 'vscode://' }[kind]);
   toast(`Prompt copied. ${label} is opening if installed — paste with Ctrl+V.`, 6000);
 });
+function replayHtml() {
+  const title = escapeHtml(lastRunMeta?.project || 'VolleyPrompt replay');
+  const snapshots = JSON.stringify(runSnapshots).replace(/</g, '\\u003c');
+  return `<!doctype html><meta charset="utf-8"><title>VolleyPrompt replay</title><style>body{background:#080611;color:#e8e2ff;font:16px system-ui;max-width:900px;margin:3em auto;padding:0 2em}pre{white-space:pre-wrap;background:#151020;padding:1em;border-radius:12px}button{padding:.7em 1em;margin:.3em}</style><h1>VolleyPrompt · ${title}</h1><div id="v"></div><button id="p">← Previous</button><button id="n">Next →</button><script>const s=${snapshots};let i=0;function r(){const x=s[i];document.querySelector('#v').innerHTML='<h2>Round '+x.round+' · Fitness '+(x.score??'—')+'/100 · '+x.verdict+'</h2><h3>Draft</h3><pre>'+x.draft.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</pre><h3>Review</h3><pre>'+x.review.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</pre>'}document.querySelector('#p').onclick=()=>{i=Math.max(0,i-1);r()};document.querySelector('#n').onclick=()=>{i=Math.min(s.length-1,i+1);r()};r();</script>`;
+}
+let replayIdx = 0;
+function renderReplay() {
+  const snap = runSnapshots[replayIdx];
+  if (!snap) return;
+  $('replaySlider').value = String(replayIdx + 1);
+  $('replayDraftHead').textContent = `Draft · Round ${snap.round}`;
+  $('replayReviewHead').textContent = `Review · ${snap.score == null ? 'no score' : snap.score + '/100'} · ${snap.verdict || ''}`;
+  $('replayDraft').textContent = snap.draft || '';
+  $('replayReview').textContent = snap.review || '';
+  $('replayPrev').disabled = replayIdx === 0;
+  $('replayNext').disabled = replayIdx >= runSnapshots.length - 1;
+}
 $('btnReplay').onclick = () => {
-  const data = { title: lastRunMeta?.project || 'VolleyPrompt replay', snapshots: runSnapshots };
-  const doc = `<!doctype html><meta charset="utf-8"><title>VolleyPrompt replay</title><style>body{background:#080611;color:#e8e2ff;font:16px system-ui;max-width:900px;margin:3em auto;padding:0 2em}pre{white-space:pre-wrap;background:#151020;padding:1em;border-radius:12px}button{padding:.7em 1em;margin:.3em}</style><h1>VolleyPrompt · ${escapeHtml(data.title)}</h1><div id="v"></div><button id="p">← Previous</button><button id="n">Next →</button><script>const s=${JSON.stringify(data.snapshots).replace(/</g,'\\u003c')};let i=0;function r(){document.querySelector('#v').innerHTML='<h2>Round '+(s[i]?.round||0)+' · Fitness '+(s[i]?.score??'—')+'/100 · '+(s[i]?.verdict||'')+'</h2><h3>Draft</h3><pre>'+s[i].draft.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</pre><h3>Review</h3><pre>'+s[i].review.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</pre>'}document.querySelector('#p').onclick=()=>{i=Math.max(0,i-1);r()};document.querySelector('#n').onclick=()=>{i=Math.min(s.length-1,i+1);r()};r();</script>`;
-  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([doc], { type: 'text/html' })); a.download = 'volleyprompt-replay.html'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  if (!runSnapshots.length) { toast('No rounds recorded for this volley yet.', 6000); return; }
+  replayIdx = runSnapshots.length - 1;
+  $('replaySlider').max = String(runSnapshots.length);
+  const when = lastRunMeta?.when ? ` · ${lastRunMeta.when}` : '';
+  $('replayMeta').textContent = `${lastRunMeta?.project || 'Untitled'} · ${runSnapshots.length} round${runSnapshots.length === 1 ? '' : 's'}${when} — step through each Draft ↔ Review exchange.`;
+  show('replayModal');
+  renderReplay();
+};
+$('replayClose').onclick = () => show('replayModal', false);
+$('replayModal').addEventListener('click', (e) => { if (e.target === $('replayModal')) show('replayModal', false); });
+$('replayPrev').onclick = () => { if (replayIdx > 0) { replayIdx--; renderReplay(); } };
+$('replayNext').onclick = () => { if (replayIdx < runSnapshots.length - 1) { replayIdx++; renderReplay(); } };
+$('replaySlider').oninput = () => { const i = Number($('replaySlider').value) - 1; if (i >= 0 && i < runSnapshots.length) { replayIdx = i; renderReplay(); } };
+$('replayDownload').onclick = () => {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([replayHtml()], { type: 'text/html' })); a.download = 'volleyprompt-replay.html'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
 $('btnShareCard').onclick = () => {
   const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 630; const c = canvas.getContext('2d');
@@ -855,7 +1061,7 @@ $('btnDemo').onclick = async () => {
     { round: 1, score: 48, verdict: 'REVISE', draft: 'Build a beautiful productivity app.', review: '1. HIGH — The target user and core workflow are unspecified.\n2. MED — No platform or completion criteria.\nFITNESS SCORE: 48/100\nVERDICT: REVISE' },
     { round: 2, score: 84, verdict: 'APPROVE', draft: 'Build a keyboard-first daily planner for solo freelancers.\n\nCore flow: capture tasks, set a due date, and review a focused Today list.\n\nConstraints: responsive web app; local persistence; accessible keyboard navigation; no account or paid service.\n\nDone when: tasks survive refresh, keyboard-only flows work, and empty/error states are covered by tests.', review: 'No HIGH issues remain.\nFITNESS SCORE: 84/100\nVERDICT: APPROVE' },
   ];
-  runSnapshots = [];  beginRun({ idea: 'Demo: make a daily planner', author: 'Prerecorded demo', critic: 'Prerecorded demo', rounds: 2, project: 'Demo', demo: true });
+  beginRun({ idea: 'Demo: make a daily planner', author: 'Prerecorded demo', critic: 'Prerecorded demo', rounds: 2, project: 'Demo', demo: true });
   for (const snap of demo) {
     await new Promise((r) => setTimeout(r, 650)); runSnapshots.push(snap);
     $('aOut').textContent = snap.draft; $('cOut').textContent = snap.review;
@@ -874,13 +1080,13 @@ $('resultHead').addEventListener('click', () => {
 // ---- Attachment UI shell (Phase 2 — local-only, not wired into pv.start) ----
 const ALLOWED_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.pdf', '.txt', '.md', '.markdown', '.json', '.csv', '.js', '.jsx', '.ts', '.tsx', '.py', '.html', '.htm', '.css']);
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+// Desktop: a beefier budget is fine — payloads stay local until the request is sent.
+// Note individual OpenRouter providers may still reject very large image payloads.
+const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_FILES = 10;
 let pendingAttachments = [];
 let attachmentIdSeq = 0;
 
-const extOf = (name) => { const i = name.lastIndexOf('.'); return i === -1 ? '' : name.slice(i).toLowerCase(); };
-const formatSize = (bytes) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const isDuplicateFile = (file) => pendingAttachments.some((a) => a.file.name === file.name && a.file.size === file.size && a.file.lastModified === file.lastModified);
 
 function addAttachmentFiles(fileList) {
@@ -888,7 +1094,7 @@ function addAttachmentFiles(fileList) {
   for (const file of Array.from(fileList)) {
     const ext = extOf(file.name);
     if (!ALLOWED_EXT.has(ext)) { rejected.push(`${file.name} (unsupported type)`); continue; }
-    if (file.size > MAX_FILE_BYTES) { rejected.push(`${file.name} (over 25 MB)`); continue; }
+    if (file.size > MAX_FILE_BYTES) { rejected.push(`${file.name} (over 64 MB)`); continue; }
     if (isDuplicateFile(file)) continue;
     if (pendingAttachments.length >= MAX_FILES) { rejected.push(`${file.name} (max ${MAX_FILES} attachments)`); continue; }
     let url = null;
@@ -926,19 +1132,20 @@ function renderAttachments() {
     const chip = document.createElement('div');
     chip.className = 'attachment-chip folder-chip' + (f.status === 'processing' ? ' processing' : '');
 
+    const isGithub = f.kind === 'github';
     const thumb = document.createElement('div');
     thumb.className = 'chip-thumb';
-    thumb.textContent = '📁';
+    thumb.textContent = isGithub ? '🐙' : '📁';
 
     const info = document.createElement('div');
     info.className = 'chip-info';
     const name = document.createElement('span');
-    name.className = 'chip-name'; name.title = f.name; name.textContent = f.name;
+    name.className = 'chip-name'; name.title = f.name; name.textContent = (isGithub ? 'GitHub · ' : '') + f.name;
     const size = document.createElement('span');
     size.className = 'chip-size';
     size.textContent = f.status === 'processing'
       ? `Reading… (${f.files.length}/${f.fileCount})`
-      : `✓ attached · included next run · ${f.fileCount} file${f.fileCount === 1 ? '' : 's'}${f.bytes ? ' · ' + formatSize(f.bytes) : ''}`;
+      : `✓ ${isGithub ? 'GitHub repo' : 'folder'} attached · included next run · ${f.fileCount} file${f.fileCount === 1 ? '' : 's'}${f.bytes ? ' · ' + formatSize(f.bytes) : ''}`;
     info.append(name, size);
 
     const removeBtn = document.createElement('button');
@@ -1031,22 +1238,12 @@ let foldersProcessingCount = 0;
 function isFolderPathIgnored(relPath) {
   const segs = relPath.split('/');
   const base = segs[segs.length - 1];
-  // Any dot-directory (.github, .cache, …) and any dotfile is skipped.
+  // Any dot-directory (.github, .cache, …) and any dotfile is skipped — they are tooling
+  // metadata, not code the models need, and cheaply cut thousands of irrelevant entries.
   if (segs.slice(0, -1).some((s) => IGNORED_DIR_NAMES.has(s) || s.startsWith('.'))) return true;
   if (base.startsWith('.')) return true;
   if (IGNORED_FILE_NAMES.has(base)) return true;
   return IGNORED_FILE_PATTERNS.some((rx) => rx.test(base));
-}
-
-const CONTEXT_KEY_FILE_RX = /(^|\/)(readme[^/]*|package\.json|pyproject\.toml|cargo\.toml|go\.mod|requirements[^/]*|composer\.json|gemfile|makefile|dockerfile[^/]*|tsconfig[^/]*|vite\.config\.[^/]*|webpack\.config\.[^/]*|tailwind\.config\.[^/]*|main\.[a-z]+|index\.[a-z]+|app\.[a-z]+|server\.[a-z]+|routes?\.[a-z]+|config\.[a-z]+)$/i;
-const CONTEXT_EXT_RANK = { '.ts': 0, '.tsx': 0, '.js': 0, '.jsx': 0, '.mjs': 0, '.cjs': 0, '.py': 0, '.cs': 1, '.go': 1, '.rs': 1, '.java': 1, '.c': 1, '.cpp': 1, '.h': 1, '.hpp': 1, '.php': 1, '.vue': 1, '.svelte': 1, '.md': 2, '.html': 2, '.css': 2, '.scss': 2, '.sql': 2, '.sh': 2, '.bat': 2, '.ps1': 2, '.json': 2, '.yaml': 2, '.yml': 2, '.toml': 2, '.xml': 2, '.svg': 3, '.txt': 3 };
-function rankContextFiles(entries) {
-  return entries.map((e) => {
-    const path = e.path || e.name || '';
-    const depth = path.split('/').length;
-    const tier = CONTEXT_KEY_FILE_RX.test(path) ? 0 : (CONTEXT_EXT_RANK[extOf(path)] ?? 4);
-    return { e, score: tier * 1000 + depth * 10 + path.length / 100 };
-  }).sort((a, b) => a.score - b.score).map((x) => x.e);
 }
 
 function setProcessingLock(on) {
@@ -1269,12 +1466,15 @@ function refreshExplorerSummary() {
   const warnEl = $('ctxWarning');
   warnEl.textContent = warn;
   warnEl.classList.toggle('hidden', !warn);
+  // Never blocks: oversized selections are trimmed by relevance at attach time.
   $('ctxAttach').disabled = files.length === 0;
 }
 
 function openContextExplorer(fileList) {
   const all = Array.from(fileList);
   if (!all.length) return;
+  // Dropped-folder files carry their path in _vpRelPath (webkitRelativePath is read-only);
+  // the picker path still uses webkitRelativePath. First segment of either is the root.
   const rootName = ((all[0]._vpRelPath || all[0].webkitRelativePath) || all[0].name).split('/')[0] || 'Project';
 
   // No file content is read here — only name/size/webkitRelativePath, same as Phase 5's
@@ -1322,8 +1522,9 @@ $('ctxAttach').onclick = async () => {
   if (!entries.length) { toast('Select at least one file.'); return; }
 
   // Nothing blocks here anymore — oversized selections are trimmed by relevance instead.
-  // Brief mode (tree + key files only) never gets trimmed; full-code mode is trimmed to
-  // the size budget, skipping rather than aborting.
+  // Brief mode (tree + key files only) is so cheap the whole selection always fits, so it
+  // never gets trimmed at all; full-code mode is trimmed to the size budget, skipping
+  // rather than aborting, so smaller ranked files behind a monster still make it in.
   const brief = !!($('ctxBrief') && $('ctxBrief').checked); // checked before the modal closes
   let ranked = rankContextFiles(entries);
   const monsters = ranked.filter((e) => e.file.size > MAX_FOLDER_FILE_BYTES);
@@ -1351,7 +1552,6 @@ $('ctxAttach').onclick = async () => {
   entries.length = 0; entries.push(...ranked);
   if (!entries.length) { toast('Nothing left to attach.'); return; }
 
-  // A folder with the same root name already attached: replace it rather than stacking a duplicate.
   const existingIdx = pendingFolders.findIndex((f) => f.name === rootName);
   if (existingIdx === -1 && pendingFolders.length >= MAX_FOLDERS) {
     toast(`You can attach up to ${MAX_FOLDERS} project folders.`, 6000); return;
@@ -1366,7 +1566,8 @@ $('ctxAttach').onclick = async () => {
 };
 
 // ---- Phase 3: serialize attachments for the real request (renderer-side only; main.js re-validates) ----
-const MAX_TOTAL_SERIALIZED_CHARS = 20 * 1024 * 1024; // ~20MB of base64/text, matches main.js's budget
+// ~90MB of encoded text ≈ the desktop 64MB decoded budget base64'd (×4/3) + headroom
+const MAX_TOTAL_SERIALIZED_CHARS = 90 * 1024 * 1024;
 
 const readFileAsDataURL = (file) => new Promise((resolve, reject) => {
   const r = new FileReader();
@@ -1451,12 +1652,12 @@ if (attachBtn && fileInput) {
     if (fileInput.files && fileInput.files.length) addAttachmentFiles(fileInput.files);
     fileInput.value = '';
   });
-}
-const folderBtn = $('folder-btn'), folderInput = $('folder-input');
-if (folderBtn && folderInput) {
+}  const folderBtn = $('folder-btn'), folderInput = $('folder-input');
+  if (folderBtn && folderInput) {
   folderBtn.addEventListener('click', () => folderInput.click());
   folderInput.addEventListener('change', () => {
     // FileList is a live view — clearing the input empties it, so snapshot first.
+    // (Clearing before snapshotting is exactly the "folder attach does nothing" bug.)
     const files = Array.from(folderInput.files || []);
     folderInput.value = '';
     if (files.length) openContextExplorer(files);
@@ -1546,7 +1747,7 @@ githubFetchBtn.onclick = async () => {
     const result = await pv.fetchGithubRepo(owner, repo);
     if (!result || !result.ok) throw new Error(result?.message || 'Could not fetch that repository.');
     if (existingIdx !== -1) { pendingFolders[existingIdx].aborted = true; pendingFolders.splice(existingIdx, 1); }
-    pendingFolders.push({ id: 'folder-' + (++attachmentIdSeq), kind: 'folder', name: result.repository || name, status: 'ready', aborted: false, files: result.files, fileCount: result.fileCount, bytes: result.bytes });
+    pendingFolders.push({ id: 'folder-' + (++attachmentIdSeq), kind: 'github', name: result.repository || name, status: 'ready', aborted: false, files: result.files, fileCount: result.fileCount, bytes: result.bytes });
     renderAttachments();
     const privacy = result.isPrivate ? 'private repository' : 'public repository';
     const keyCount = result.fileCount - 1;
@@ -1653,17 +1854,45 @@ $('btnNewChat').onclick = () => {
 };
 
 let historyItems = [];
+let historyQuery = '';
+let compareFirst = null; // history name picked as the left side of a comparison
+const OUTCOME_ICON = { used: '✓', edited: '✎', failed: '!', unused: '–' };
+
+function historyTarget(name) {
+  const run = historyItems.find((x) => x.name === name);
+  return {
+    kind: 'run', name,
+    title: (run && run.title) || name.replace(/-final\.md$|-draft\.md$/, ''),
+    key: (run && run.meta && run.meta.project) || '',
+  };
+}
+
 async function loadHistory() {
-  historyItems = await pv.runs();
+  historyItems = (await pv.runs()) || [];
   const history = $('history');
   history.textContent = '';
+  const shown = filterRuns(historyItems, historyQuery);
+  if (!shown.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-empty';
+    empty.textContent = historyQuery ? 'No volleys match your search.' : 'No volleys yet — your finished prompts will appear here.';
+    history.appendChild(empty);
+    return;
+  }
   const groups = new Map();
-  for (const r of historyItems) {
+  for (const r of shown) {
     // The project name is the folder; '' is the "Other volleys" fallback bucket.
     const key = (r.meta && r.meta.project) || '';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
   }
+  const act = (icon, tip, action, name, danger) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.title = tip; b.setAttribute('aria-label', tip); b.textContent = icon;
+    if (danger) b.className = 'danger';
+    b.addEventListener('click', (e) => { e.stopPropagation(); runHistoryAction(action, historyTarget(name)); });
+    return b;
+  };
   for (const [key, items] of groups) {
     const heading = document.createElement('div');
     heading.className = 'history-project';
@@ -1695,41 +1924,49 @@ async function loadHistory() {
     heading.addEventListener('dragend', () => heading.classList.remove('dragging'));
     history.appendChild(heading);
     for (const r of items) {
-      const stamp = r.name.replace('-final.md', '');
+      const stamp = r.name.replace(/-(final|draft)\.md$/, '');
       const el = document.createElement('div');
-      el.className = 'hist-item';
+      el.className = 'hist-item' + (compareFirst === r.name ? ' compare-pending' : '');
       el.dataset.path = r.path;
       el.dataset.id = r.name; // For context menu / drag-drop referencing
-      el.title = `${stamp}${r.meta?.modelPair ? `\nWriter ${r.meta.modelPair.author} · Reviewer ${r.meta.modelPair.critic}` : ''}\n✎ rename · 📁 move · 🗑 delete (also on right-click)`; // r.title is user-controlled — never into innerHTML/attributes unescaped
+      el.tabIndex = 0;
+      const mp = r.meta?.modelPair;
+      el.title = `${stamp}${mp ? `\nWriter ${mp.author} · Reviewer ${mp.critic}` : ''}\nF2 rename · Delete remove · Enter open`; // r.title is user-controlled: never into innerHTML
       const title = document.createElement('span');
       title.className = 'hist-title';
       title.textContent = (r.incomplete ? '✂ ' : '') + (r.title || stamp)
-        + (r.meta?.outcome ? ` · ${({ used: '✓', edited: '✎', failed: '!', unused: '–' })[r.meta.outcome] || ''}` : '')
+        + (r.meta?.outcome ? ` · ${OUTCOME_ICON[r.meta.outcome] || ''}` : '')
         + (r.meta?.score != null ? ` · ${r.meta.score}` : '');
-      // Visible management buttons (the desktop build has them): rename / move / delete.
-      // They used to hide behind a right-click nobody could discover.
       const actions = document.createElement('span');
       actions.className = 'hist-actions';
-      const act = (icon, tip, action, danger) => {
-        const b = document.createElement('button');
-        b.type = 'button'; b.title = tip; b.setAttribute('aria-label', tip); b.textContent = icon;
-        if (danger) b.className = 'danger';
-        b.addEventListener('click', (e) => { e.stopPropagation(); runHistoryAction(action, { kind: 'run', name: r.name, title: r.title || stamp, key: (r.meta && r.meta.project) || '' }); });
-        return b;
-      };
-      actions.append(act('✎', 'Rename', 'rename'), act('📁', 'Move to folder', 'move'), act('🗑', 'Delete', 'delete', true));
+      actions.append(
+        act('✎', 'Rename (F2)', 'rename', r.name),
+        act('📁', 'Move to folder', 'move', r.name),
+        act('⚖', 'Compare with another volley', 'compare', r.name),
+        act('🗑', 'Delete (Del)', 'delete', r.name, true),
+      );
       el.append(title, actions);
       el.draggable = true;
-      // Saved runs live in browser storage; clicking loads the final prompt (and the original idea).
+      // Saved runs are on disk; clicking loads the final prompt (and the original idea) via pv.openRun.
       el.addEventListener('click', () => openHistoryItem(r.name));
+      el.addEventListener('keydown', (e) => {
+        if (e.target !== el) return;
+        if (e.key === 'F2') { e.preventDefault(); runHistoryAction('rename', historyTarget(r.name)); }
+        else if (e.key === 'Delete') { e.preventDefault(); runHistoryAction('delete', historyTarget(r.name)); }
+        else if (e.key === 'Enter') { e.preventDefault(); openHistoryItem(r.name); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const all = [...history.querySelectorAll('.hist-item')];
+          const next = all[all.indexOf(el) + (e.key === 'ArrowDown' ? 1 : -1)];
+          if (next) next.focus();
+        }
+      });
       history.appendChild(el);
     }
   }
 }
-
-
-// Populate the sidebar on load — without this the web build showed no history until a run finished.
-loadHistory();
+$('historySearch').addEventListener('input', () => { historyQuery = $('historySearch').value; loadHistory(); });
+$('historySearch').addEventListener('keydown', (e) => { if (e.key === 'Escape') { $('historySearch').value = ''; historyQuery = ''; loadHistory(); } });
 
 function showIdeaRecap(idea, whenText) {
   // Any freshly shown result (new run or history load) starts expanded.
@@ -1743,21 +1980,33 @@ function showIdeaRecap(idea, whenText) {
   }
   if (whenText) $('savedAt').textContent = whenText;
 }
-function openHistoryItem(name) {
+async function openHistoryItem(name) {
   const item = historyItems.find((x) => x.name === name);
-  if (!item || !item.final) { toast('No saved result for this entry.', 6000); return; }
+  if (!item || !item.path) { toast('No saved result for this entry.', 6000); return; }
+  const got = await pv.openRun(name).catch(() => null);
+  if (!got || !got.final) { toast('No saved result for this entry.', 6000); return; }
   currentHistoryName = name;
-  runSnapshots = item.meta?.snapshots || [];
-  lastRunMeta = { ...(lastRunMeta || {}), ...(item.meta?.modelPair ? { author: item.meta.modelPair.author, critic: item.meta.modelPair.critic } : {}), project: item.meta?.project || '', snapshots: runSnapshots, currentName: name };
+  runSnapshots = got.meta?.snapshots || [];
+  lastRunMeta = { ...(lastRunMeta || {}), ...(got.meta?.modelPair ? { author: got.meta.modelPair.author, critic: got.meta.modelPair.critic } : {}), project: got.meta?.project || '', snapshots: runSnapshots, currentName: name };
   $('versionSlider').disabled = !runSnapshots.length; $('versionSlider').min = '1'; $('versionSlider').max = String(Math.max(1, runSnapshots.length)); $('versionSlider').value = String(Math.max(1, runSnapshots.length));
-  $('versionLabel').textContent = runSnapshots.length ? `Round ${runSnapshots.length}` : '—'; $('fitnessScore').textContent = item.meta?.score != null ? `Fitness: ${item.meta.score}/100` : 'Fitness: —'; $('outcomeTag').value = item.meta?.outcome || '';
-  runAbandoned = true; // opening a history item abandons any background run, same as New Volley
-  const when = /^\d+$/.test(item.name) ? new Date(Number(item.name)).toLocaleString() : '';
-  show('result', false); show('run', false); show('result');
-  $('final').value = item.final;
-  const note = (when ? `Loaded from history · ${when}` : 'Loaded from history') + (item.incomplete ? ' · stopped draft' : '');
-  showIdeaRecap(item.idea, note);
+  $('versionLabel').textContent = runSnapshots.length ? `Round ${runSnapshots.length}` : '—';
+  $('fitnessScore').textContent = got.meta?.score != null ? `Fitness: ${got.meta.score}/100` : 'Fitness: —';
+  $('outcomeTag').value = got.meta?.outcome || '';
+  const mp = got.meta?.modelPair;
+  $('modelInfo').textContent = mp ? `Models: Writer ${mp.author} · Reviewer ${mp.critic}${got.meta?.cost ? ` · $${Number(got.meta.cost).toFixed(4)}` : ''}` : 'Models: not recorded for this volley';
+  // Opening a history item abandons any background run, same as New Volley.
+  runAbandoned = true;
+  const d = parseStamp(name);
+  // The composer stays hidden while a saved volley is open (it used to sit above the result and
+  // force a scroll); "+ New volley" brings it back.
+  show('setup', false); show('result', false); show('run', false); show('result');
+  window.scrollTo(0, 0); document.querySelector('main')?.scrollTo?.(0, 0);
+  $('final').value = got.final;
+  showIdeaRecap(got.idea, (d ? `Loaded from history · ${d.toLocaleString()}` : 'Loaded from history') + (item.incomplete ? ' · stopped draft' : ''));
+  updateResultButtons();
 }
+loadHistory();
+
 
 // ---- Sidebar history: right-click menu, rename, delete, move -----------------
 // The history list is rebuilt from scratch by loadHistory() every time it refreshes,
@@ -1784,10 +2033,11 @@ function openContextMenu(e, target) {
     if (show && el.dataset.action === 'delete-project' && !target.key) show = false;
     el.classList.toggle('hidden', !show);
   });
-  contextMenu.style.left = `${e.pageX}px`;
-  contextMenu.style.top = `${e.pageY}px`;
   contextMenu.classList.remove('hidden');
   contextMenu.classList.add('visible');
+  const mw = contextMenu.offsetWidth, mh = contextMenu.offsetHeight;
+  contextMenu.style.left = `${Math.max(4, Math.min(e.clientX, innerWidth - mw - 4))}px`;
+  contextMenu.style.top = `${Math.max(4, Math.min(e.clientY, innerHeight - mh - 4))}px`;
 }
 
 // Text prompt. `choices` are quick-pick buttons (used by "move to folder").
@@ -1890,6 +2140,18 @@ async function runHistoryAction(action, target) {
       toast('Volley deleted.', 3000);
       await loadHistory();
     } else toast('Delete failed.', 4000);
+  } else if (action === 'rerun') {
+    await rerunFromHistory(target.name);
+  } else if (action === 'compare') {
+    if (!compareFirst || compareFirst === target.name) {
+      compareFirst = compareFirst === target.name ? null : target.name;
+      await loadHistory();
+      toast(compareFirst ? 'Now click ⚖ (or right-click → Compare with…) on a second volley.' : 'Comparison cancelled.', 5000);
+    } else {
+      const a = compareFirst; compareFirst = null;
+      await loadHistory();
+      window.openCompare(a, target.name);
+    }
   } else if (action === 'rename-project') {
     const name = await askText({ title: 'Rename folder', label: 'Folder name', value: target.label, okLabel: 'Rename' });
     if (name === null) return;
@@ -1930,13 +2192,7 @@ if (historyEl) {
     const item = e.target.closest('.hist-item');
     if (item) {
       e.preventDefault();
-      const name = item.dataset.id;
-      const run = historyItems.find((x) => x.name === name);
-      openContextMenu(e, {
-        kind: 'run', name,
-        title: (run && run.title) || name.replace(/-final\.md$|-draft\.md$/, ''),
-        key: (run && run.meta && run.meta.project) || '',
-      });
+      openContextMenu(e, historyTarget(item.dataset.id));
       return;
     }
     const group = e.target.closest('.history-project');
@@ -1981,9 +2237,7 @@ if (historyEl) {
       // Dropping one folder onto another merges its volleys into the target.
       const src = payload.slice(7);
       if (src === dest) return;
-      const list = await pv.projects();
-      const match = (list || []).find((p) => p.key === src);
-      const moved = await pv.renameProject(src, dest || 'Other volleys');
+      const moved = dest ? await pv.renameProject(src, dest) : await pv.deleteProject(src);
       toast(moved ? `Moved ${moved} volley${moved === 1 ? '' : 's'} into "${dest || 'Other volleys'}".` : 'Nothing to move.', 3500);
       await loadHistory();
       return;
@@ -1994,6 +2248,70 @@ if (historyEl) {
   });
 }
 
+// ---- Re-run with the same setup: idea, models, providers, rounds, mode, rubric from saved metadata ----
+async function rerunFromHistory(name) {
+  const got = await pv.openRun(name).catch(() => null);
+  if (!got) { toast('Could not load that volley.', 5000); return; }
+  const m = got.meta || {}, c = m.config || {}, pair = m.modelPair || {};
+  $('idea').value = got.idea || '';
+  $('projectName').value = m.project || '';
+  if (pair.author) { $('author').value = pair.author; store.set('author', pair.author); }
+  if (pair.critic) { $('critic').value = pair.critic; store.set('critic', pair.critic); }
+  if (c.rounds) $('rounds').value = String(c.rounds);
+  $('auto').checked = !!c.auto;
+  $('outputMode').value = c.outputMode === 'deep-plan' ? 'deep-plan' : 'prompt';
+  for (const [sel, key, val] of [['authorProvider', 'authorProvider', c.authorProvider], ['criticProvider', 'criticProvider', c.criticProvider]]) {
+    if (val) { $(sel).value = val; store.set(key, val); }
+  }
+  await applyProviderToField($('author'), $('authorProvider').value);
+  await applyProviderToField($('critic'), $('criticProvider').value);
+  if (m.rubric !== undefined || c.fallback !== undefined) saveSettings({ ...loadSettings(), rubric: m.rubric || '', fallback: c.fallback || '' });
+  runAbandoned = true;
+  show('result', false); show('run', false); show('setup');
+  refreshVisionHints(); updateCostEstimate();
+  const att = Array.isArray(m.attachments) && m.attachments.length ? ` Re-attach if needed: ${m.attachments.slice(0, 5).join(', ')}${m.attachments.length > 5 ? '…' : ''}.` : '';
+  toast('Setup restored — edit anything, then start the volley.' + att, att ? 9000 : 5000);
+  $('idea').focus();
+}
+function updateResultButtons() {
+  $('btnRerun').hidden = !currentHistoryName;
+  $('btnCompare').hidden = !currentHistoryName;
+}
+$('btnRerun').onclick = () => { if (currentHistoryName) rerunFromHistory(currentHistoryName); };
+$('btnCompare').onclick = () => { if (currentHistoryName) runHistoryAction('compare', historyTarget(currentHistoryName)); };
+
+// ---- Cost estimate shown before you start: range from "approved after round 1" to "every round runs" ----
+// Full catalogue (including paid models) loads in the background, purely for price estimates.
+let MODEL_PRICE_ROWS = null;
+pv.models({ all: true }).then((r) => { MODEL_PRICE_ROWS = r || null; updateCostEstimate(); }).catch(() => {});
+function pricesOf(provider, modelId) {
+  if (provider === 'ollama') return { free: true };
+  if (provider !== 'openrouter') return null; // subscription CLIs / OpenAI list prices aren't in the catalogue
+  const row = (MODEL_PRICE_ROWS || MODEL_ROWS).find((r) => r.id === modelId);
+  if (!row) return null;
+  return row.isFree ? { free: true } : { inPerM: row.inPerM, outPerM: row.outPerM };
+}
+function attachmentChars() {
+  let n = 0;
+  for (const f of pendingFolders) if (f.status === 'ready') n += f.files.reduce((x, y) => x + y.text.length, 0);
+  for (const a of pendingAttachments) if (!IMAGE_EXT.has(extOf(a.file.name))) n += a.file.size;
+  return n;
+}
+function updateCostEstimate() {
+  const el = $('costEstimate'); if (!el) return;
+  const ap = $('authorProvider').value || 'openrouter', cp = $('criticProvider').value || 'openrouter';
+  const rounds = Math.max(1, Math.min(8, +$('rounds').value || 3));
+  const subs = [ap, cp].some((p) => p === 'anthropic' || p === 'google');
+  const est = estimateRunCost({ ideaChars: $('idea').value.length, attachChars: attachmentChars(), rounds, writer: pricesOf(ap, $('author').value.trim()), reviewer: pricesOf(cp, $('critic').value.trim()) });
+  if (est) {
+    el.textContent = est.high === 0 ? 'Estimated cost: free with these models.'
+      : `Estimated cost: typically ${formatMoney(est.low)}–${formatMoney(est.high)} (1 to ${rounds} round${rounds === 1 ? '' : 's'}; images not counted).`;
+  } else if (subs) el.textContent = 'Subscription / account-based provider selected — cost estimate unavailable (uses your plan or free allowance).';
+  else el.textContent = '';
+}
+['idea', 'author', 'critic', 'rounds'].forEach((id) => $(id).addEventListener('input', updateCostEstimate));
+['authorProvider', 'criticProvider'].forEach((id) => $(id).addEventListener('change', updateCostEstimate));
+setTimeout(updateCostEstimate, 800); setInterval(updateCostEstimate, 4000); // catalogue loads async; also follows attachments
 
 // animated background
 const c = $('bgCanvas'); const ctx = c.getContext('2d');
@@ -2026,6 +2344,22 @@ frame();
 const panelOf = (role) => document.querySelector('.panel.' + role);
 const streaming = (role, on) => panelOf(role).classList.toggle('streaming', on);
 
+// "Is it frozen?" feedback: until the first words arrive, show how long we've been waiting and,
+// after 20s, say what is probably happening and what to do (free models queue for minutes).
+let waitTimer = null;
+function stopWaitTimer() { if (waitTimer) { clearInterval(waitTimer); waitTimer = null; } }
+function startWaitTimer(base, model) {
+  stopWaitTimer();
+  const t0 = Date.now();
+  const tick = () => {
+    const secs = Math.round((Date.now() - t0) / 1000);
+    if (secs < 3) return;
+    const free = /:free$/i.test(model || '');
+    $('statusText').textContent = `${base} waiting for the first words · ${secs}s`
+      + (secs >= 20 ? (free ? ' · free models queue behind other users — use ↻ Retry round with a paid model if this drags' : ' · the model is slow to start — use ↻ Retry round to switch models') : '');
+  };
+  waitTimer = setInterval(tick, 1000);
+}
 pv.onEvent(async (ev) => {
   switch (ev.type) {
     case 'round':
@@ -2039,13 +2373,16 @@ pv.onEvent(async (ev) => {
       (isA ? $('aRound') : $('cRound')).textContent = `· round ${ev.r}`;
       streaming('author', isA); streaming('critic', !isA);
       $('statusText').textContent = isA ? `✍ Writer is drafting (round ${ev.r})…` : `🔍 Reviewer is reading (round ${ev.r})…`;
+      startWaitTimer($('statusText').textContent, isA ? $('runAuthor').value : $('runCritic').value);
       break;
     }
     case 'delta': {
+      stopWaitTimer();
       const o = ev.role === 'author' ? $('aOut') : $('cOut');
       o.textContent += ev.text; o.scrollTop = o.scrollHeight; break;
     }
     case 'verdict':
+      stopWaitTimer();
       streaming('critic', false);
       $('statusText').textContent = ev.verdict === 'APPROVE' ? '✅ Reviewer approved!' : '↻ Reviewer wants changes';
       break;
@@ -2073,7 +2410,7 @@ pv.onEvent(async (ev) => {
       const box = $('reviewIssues'); box.textContent = '';
       if (ev.issues?.length) {
         const title = document.createElement('p'); title.className = 'hint'; title.textContent = 'Choose which reviewer issues the Writer should address (all selected by default).'; box.appendChild(title);
-        ev.issues.forEach((issue, i) => { const label = document.createElement('label'); label.className = 'issue-choice'; const input = document.createElement('input'); input.type = 'checkbox'; input.value = issue; input.checked = true; const text = document.createElement('span'); text.textContent = issue; label.append(input, text); box.appendChild(label); });
+        ev.issues.forEach((issue) => { const label = document.createElement('label'); label.className = 'issue-choice'; const input = document.createElement('input'); input.type = 'checkbox'; input.value = issue; input.checked = true; const text = document.createElement('span'); text.textContent = issue; label.append(input, text); box.appendChild(label); });
         show('reviewIssues');
       } else show('reviewIssues', false);
       if (ev.score != null) $('fitnessScore').textContent = `Fitness: ${ev.score}/100 · ${ev.verdict}`;
@@ -2085,24 +2422,28 @@ pv.onEvent(async (ev) => {
     case 'await-notes': show('notesBox'); $('notes').focus(); $('notesBox').scrollIntoView({ behavior: 'smooth' }); break;
     case 'notice': toast('ℹ ' + ev.message, 8000); break;
     case 'done':
-          streaming('author', false); streaming('critic', false); show('notesBox', false); show('reviewIssues', false);
-          if (ev.snapshots) runSnapshots = ev.snapshots;
-          await loadHistory();
-          const finishedItem = historyItems.find((x) => x.name === ev.historyName) || historyItems[0];
-          currentHistoryName = ev.historyName || finishedItem?.name || null;
-          if (lastRunMeta) { lastRunMeta.currentName = currentHistoryName; lastRunMeta.snapshots = ev.snapshots || runSnapshots; }
-          if (runAbandoned) break; // user already left via New Volley; don't yank them into a view they didn't ask for
-          if (!ev.final) { show('run', false); show('setup'); toast('Stopped.'); break; }
-          $('final').value = ev.final;
-          runSnapshots = ev.snapshots || runSnapshots;
-          if (ev.score != null) $('fitnessScore').textContent = `Fitness: ${ev.score}/100`;
-          const modelText = lastRunMeta ? `Model: ${lastRunMeta.author} · ${lastRunMeta.critic}` : '';
-          $('modelInfo').textContent = modelText;
-          $('outcomeTag').value = '';
-          showIdeaRecap(ev.idea, ev.file ? `Saved to ${ev.file}` : 'Stopped early — this is the latest draft.');
-          show('run', false); show('result');
-          break;
+      stopWaitTimer();
+      streaming('author', false); streaming('critic', false); show('notesBox', false); show('reviewIssues', false);
+      await loadHistory();
+      const finishedItem = historyItems.find((x) => x.name === ev.historyName) || historyItems[0];
+      currentHistoryName = ev.historyName || finishedItem?.name || null;
+      if (lastRunMeta) { lastRunMeta.currentName = currentHistoryName; lastRunMeta.snapshots = ev.snapshots || runSnapshots; }
+      if (runAbandoned) break; // user already left via New Volley; don't yank them into a view they didn't ask for
+      if (!ev.final) { show('run', false); show('setup'); toast('Stopped.'); break; }
+      $('final').value = ev.final;
+      runSnapshots = ev.snapshots || runSnapshots;
+      if (ev.score != null) $('fitnessScore').textContent = `Fitness: ${ev.score}/100`;
+      const fm = ev.models || (lastRunMeta ? { author: lastRunMeta.author, critic: lastRunMeta.critic } : null);
+      if (fm && lastRunMeta) { lastRunMeta.author = fm.author; lastRunMeta.critic = fm.critic; }
+      const modelText = fm ? `Models: Writer ${fm.author} · Reviewer ${fm.critic}${ev.cost ? ` · $${Number(ev.cost).toFixed(4)}` : ''}` : '';
+      $('modelInfo').textContent = modelText;
+      $('outcomeTag').value = '';
+      showIdeaRecap(ev.idea, ev.file ? `Saved to ${ev.file}` : 'Stopped early — this is the latest draft.');
+      show('run', false); show('result');
+      updateResultButtons();
+      break;
     case 'error':
+      stopWaitTimer();
       streaming('author', false); streaming('critic', false); show('notesBox', false);
       if (runAbandoned) break;
       show('run', false);

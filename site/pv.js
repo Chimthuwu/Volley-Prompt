@@ -331,6 +331,17 @@ VERDICT: APPROVE if there are no HIGH issues left, otherwise VERDICT: REVISE.`;
     return moved;
   }
 
+  // ---- unified renderer support (todo A1): renderer/app.js now runs on the web verbatim, so
+  // pv.js must expose the same surface preload.js does. The browser is OpenRouter-only — every
+  // other provider is a local CLI or local binary a web page cannot reach.
+  function openRun(name) {
+    const item = loadHistoryList().find((x) => x.name === name);
+    return item ? { final: item.final || '', idea: item.idea || '', meta: item.meta || {}, log: '' } : null;
+  }
+  const WEB_PROVIDERS = [
+    { id: 'openrouter', name: 'OpenRouter', authType: 'api_key', billingNote: 'OpenRouter bills your key per token; ":free" models cost nothing.' },
+  ];
+
   // ---- run orchestration: same round loop, notes-wait, and Stop-vs-Finish-here distinction as main.js ----
   let current = null;
   let eventListener = null;
@@ -514,16 +525,16 @@ VERDICT: APPROVE if there are no HIGH issues left, otherwise VERDICT: REVISE.`;
       // the user being happy with the draft.
       if (ctl.signal.aborted) {
         if (draft.trim()) saveHistoryEntry(title, draft, idea, true, { snapshots, metrics, cost: actualCost, tokens: usagePrompt + usageCompletion, score: snapshots.at(-1)?.score ?? null, project: cfg.project || '', rubric, modelPair: { ...runModels } }); // stopped drafts still land in history
-        send({ type: 'done', final: draft, file: '', historyName: loadHistoryList()[0]?.name || '', stopped: true, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
+        send({ type: 'done', final: draft, file: '', historyName: loadHistoryList()[0]?.name || '', stopped: true, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics, models: { ...runModels } });
       } else {
         saveHistoryEntry(title, draft, idea, false, { snapshots, metrics, cost: actualCost, tokens: usagePrompt + usageCompletion, score: snapshots.at(-1)?.score ?? null, project: cfg.project || '', rubric, modelPair: { ...runModels } });
         finalSaved = true;
-        send({ type: 'done', final: draft, file: "your browser's local history", historyName: loadHistoryList()[0]?.name || '', idea, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
+        send({ type: 'done', final: draft, file: "your browser's local history", historyName: loadHistoryList()[0]?.name || '', idea, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics, models: { ...runModels } });
       }
     } catch (e) {
       if (ctl.signal.aborted) {
         if (draft.trim()) saveHistoryEntry(title, draft, idea, true, { snapshots, metrics, cost: actualCost, tokens: usagePrompt + usageCompletion, score: snapshots.at(-1)?.score ?? null, project: cfg.project || '', rubric, modelPair: { ...runModels } });
-        send({ type: 'done', final: draft, file: '', historyName: loadHistoryList()[0]?.name || '', stopped: true, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
+        send({ type: 'done', final: draft, file: '', historyName: loadHistoryList()[0]?.name || '', stopped: true, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics, models: { ...runModels } });
       }
       else send({ type: 'error', message: e.message || String(e), partial: draft, idea });
     } finally {
@@ -657,6 +668,23 @@ VERDICT: APPROVE if there are no HIGH issues left, otherwise VERDICT: REVISE.`;
     // "Send to ▸ Hermes" needs a local CLI; a browser page cannot start one. The UI copies
     // the prompt first, so this message can point the user at the desktop app.
     hermesRun: async () => ({ ok: false, message: "Hermes handoff runs in the desktop app (a browser page can't start local CLIs). The prompt is on your clipboard — paste it into a terminal running: hermes chat" }),
+    // Reads one saved volley (sidebar click). Desktop: lib/runs-store.readRun; web: localStorage.
+    openRun: async (name) => openRun(name),
+    // Provider surfaces for the unified settings UI. The web speaks OpenRouter only; the other
+    // roster entries report honestly that they are desktop-only.
+    providersList: async () => WEB_PROVIDERS,
+    providersStatus: async () => ({ openrouter: { connected: !!loadKey() } }),
+    providerCredsHas: async () => ({ present: !!loadKey(), masked: '' }),
+    providerCredsSave: async () => ({ present: !!loadKey(), masked: '' }),
+    providerModels: async () => [],
+    providerConnect: async (_id, value) => {
+      const check = typeof value === 'string' && value.trim() ? value.trim() : loadKey();
+      if (!check) return { ok: false, models: [], message: 'No key saved. Paste it and save first.' };
+      try {
+        const r = await fetch(`${API}/auth/key`, { headers: { Authorization: `Bearer ${check}` } });
+        return { ok: r.ok, models: [], message: r.ok ? undefined : friendly(r.status) };
+      } catch { return { ok: false, models: [], message: "Can't reach OpenRouter. Check your internet." }; }
+    },
     updateRun: async (name, patch) => {
       const items = loadHistoryList(), item = items.find((x) => x.name === name);
       if (!item) return false;

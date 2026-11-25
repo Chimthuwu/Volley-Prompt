@@ -13,8 +13,9 @@
     "test:e2e": "electron scripts/e2e/e2e-history.js",
     "test:e2e:web": "electron scripts/e2e/e2e-history-web.js",
     "dist": "npm run icons && electron-builder --win --publish never",
+    "build:web": "node scripts/build-web.mjs",
     "site:dev": "wrangler pages dev site",
-    "site:deploy": "wrangler pages deploy site --project-name=volley-prompt --branch=main --commit-dirty=true"
+    "site:deploy": "npm run build:web && wrangler pages deploy site --project-name=volley-prompt --branch=main --commit-dirty=true"
   },
   "build": {
     "appId": "com.serge.volleyprompt",

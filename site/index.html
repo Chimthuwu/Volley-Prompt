@@ -1,14 +1,12 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://openrouter.ai https://api.github.com https://raw.githubusercontent.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://api.github.com https://raw.githubusercontent.com https://openrouter.ai">
 <title>VolleyPrompt — two AIs, one perfect prompt</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="Two AI models volley your prompt back and forth until it's actually good — runs entirely in your browser, bring your own OpenRouter key. Open source: github.com/Chimthuwu/Volley-Prompt">
 <link rel="icon" href="icon.svg">
 <link rel="canonical" href="https://volley-prompt.pages.dev/">
-
-<!-- Open Graph (Discord, Facebook, Slack, LinkedIn, ...) -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://volley-prompt.pages.dev/">
 <meta property="og:title" content="VolleyPrompt — two AIs, one perfect prompt">
@@ -18,8 +16,6 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="VolleyPrompt — two AIs volley your prompt until it's perfect">
 <meta property="og:site_name" content="VolleyPrompt">
-
-<!-- Twitter / X -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="VolleyPrompt — two AIs, one perfect prompt">
 <meta name="twitter:description" content="Two AI models volley your prompt back and forth until it's actually good. Free in your browser or as a Windows desktop app. Source: github.com/Chimthuwu/Volley-Prompt">
@@ -42,17 +38,18 @@
       </div>
     </div>
     <button class="tb-btn" id="btnSettings" title="Settings" aria-label="Settings">⚙</button>
-    <a class="tb-btn" id="desktopDl" href="https://github.com/Chimthuwu/Volley-Prompt/releases/latest/download/VolleyPrompt.-.Windows.Setup.exe" title="Download the Windows desktop app" aria-label="Download the Windows desktop app" style="display:flex;align-items:center;justify-content:center;text-decoration:none;width:auto;padding:0 10px;font-size:11px;font-weight:700;white-space:nowrap">⬇ Desktop app</a>
-    <a class="tb-btn" href="https://github.com/Chimthuwu/Volley-Prompt" target="_blank" rel="noopener" title="View on GitHub" aria-label="View on GitHub" style="display:flex;align-items:center;justify-content:center;text-decoration:none">★</a>
-    <button class="tb-btn" id="tbMin" title="Minimize" style="display:none">─</button>
-    <button class="tb-btn" id="tbMax" title="Maximize" style="display:none">□</button>
-    <button class="tb-btn tb-close" id="tbClose" title="Close" style="display:none">✕</button>
+    <a class="tb-btn" href="https://github.com/Chimthuwu/Volley-Prompt/releases/latest" title="Download the Windows desktop app" aria-label="Download the Windows desktop app" style="display:flex;align-items:center;justify-content:center;text-decoration:none;width:auto;padding:0 10px;font-size:11px;font-weight:700;white-space:nowrap">&#11015; Desktop app</a>
+    <a class="tb-btn" href="https://github.com/Chimthuwu/Volley-Prompt" target="_blank" rel="noopener" title="View on GitHub" aria-label="View on GitHub" style="display:flex;align-items:center;justify-content:center;text-decoration:none">&#9733;</a>
+    <button class="tb-btn" id="tbMin" title="Minimize" style="display:none">&#9473;</button>
+    <button class="tb-btn" id="tbMax" title="Maximize" style="display:none">&#9633;</button>
+    <button class="tb-btn tb-close" id="tbClose" title="Close" style="display:none">&#10005;</button>
   </div>
 </div>
 <div class="shell">
   <aside class="sidebar">
     <button class="newchat" id="btnNewChat">+ New volley</button>
     <div class="side-label">History</div>
+    <input type="search" id="historySearch" class="history-search" placeholder="Search volleys, models, projects…" aria-label="Search volleys" spellcheck="false">
     <div class="history" id="history"></div>
     <div class="sidebar-footer">
       <button class="icon-btn" id="btnFolder" title="Clear local history" aria-label="Clear local history">🗑</button>
@@ -77,8 +74,8 @@
       </div>
     </div>
     <div class="row">
-      <label>✍ Writer AI <small>writes the prompt</small><input id="author" spellcheck="false"></label>
-      <label>🔍 Reviewer AI <small>picks it apart</small><input id="critic" spellcheck="false"></label>
+      <label>✍ Writer AI <small>writes the prompt</small><input id="author" spellcheck="false"><select id="authorProvider" class="prov-select" title="Provider powering the Writer" aria-label="Writer provider"></select></label>
+      <label>🔍 Reviewer AI <small>picks it apart</small><input id="critic" spellcheck="false"><select id="criticProvider" class="prov-select" title="Provider powering the Reviewer" aria-label="Reviewer provider"></select></label>
 
     </div>
     <datalist id="modelList"></datalist>
@@ -97,6 +94,7 @@
     </div>
     <label class="check"><input type="checkbox" id="auto"> Hands-off mode (don't pause for my notes between rounds)</label>
     <div class="composer-actions"><label class="rounds-inline" title="What the volley should produce: a build prompt, or a deep, code-grounded research & execution plan">Output <select id="outputMode"><option value="prompt">Prompt</option><option value="deep-plan">Code plan</option></select></label><label class="rounds-inline" title="How many Writer ↔ Reviewer exchanges before it stops">Max rounds <input id="rounds" type="number" min="1" max="8" value="3"></label><button class="big" id="btnStart">Start the volley</button> <span class="hint">or press Ctrl+Enter</span></div>
+    <p class="hint cost-estimate" id="costEstimate" aria-live="polite"></p>
   </section>
 
   <section id="run" class="hidden">
@@ -137,7 +135,7 @@
         <span>Annotate</span>
       </button>
     </div>
-    <div class="result-tools"><button class="ghost" id="btnTestDrive">🧪 Test-drive</button><button class="ghost" id="btnVariant">↔ Variant</button><button class="ghost" id="btnReplay">⏯ Export replay</button><button class="ghost" id="btnShareCard">🖼 Share card</button><button class="ghost" id="btnSendTo" title="Send this prompt to a coding agent — Cursor, Claude, VS Code or Cline">↗ Send to ▾</button></div>
+    <div class="result-tools"><button class="ghost" id="btnTestDrive">🧪 Test-drive</button><button class="ghost" id="btnVariant">↔ Variant</button><button class="ghost" id="btnReplay">⏯ Replay</button><button class="ghost" id="btnShareCard">🖼 Share card</button><button class="ghost" id="btnSendTo" title="Send this prompt to a coding agent — Cursor, Claude, VS Code, Cline or Hermes">↗ Send to ▾</button></div>
     <div class="row"><label>Outcome <small>help measure prompt usefulness</small><select id="outcomeTag"><option value="">Not rated</option><option value="used">Used as-is</option><option value="edited">Edited first</option><option value="failed">Didn't work</option><option value="unused">Didn't use</option></select></label></div>
     <div class="variant-box hidden" id="variantBox">
       <label>What should the variant change? <small>optional — leave blank for an independent alternative</small>
@@ -146,7 +144,7 @@
       <div class="row"><button class="ghost" id="btnVariantGo">Generate variant</button><button class="ghost" id="btnVariantCancel">Cancel</button></div>
     </div>
     <div class="utility-output hidden" id="utilityOutput"><div class="utility-head"><strong id="utilityTitle"></strong><button class="icon-btn" id="utilityClose" title="Close">✕</button></div><pre id="utilityText"></pre></div>
-    <div class="row"><button class="big" id="btnCopy">📋 Copy prompt</button><button class="ghost" id="btnCopyMd" title="Copy with a Markdown header (date, models, rounds)">📄 Copy as .md</button><button class="ghost" id="btnBack">✏ Tweak my idea &amp; re-run</button><button class="ghost" id="btnAgain">Start a new one</button></div>
+    <div class="row"><button class="big" id="btnCopy">📋 Copy prompt</button><button class="ghost" id="btnCopyMd" title="Copy with a Markdown header (date, models, rounds)">📄 Copy as .md</button><button class="ghost" id="btnRerun" title="Reload this volley's idea, models, rounds and settings into the composer" hidden>🔁 Re-run with same setup</button><button class="ghost" id="btnCompare" title="Compare this volley with another one side by side" hidden>⚖ Compare…</button><button class="ghost" id="btnBack">✏ Tweak my idea &amp; re-run</button><button class="ghost" id="btnAgain">Start a new one</button></div>
     <p class="hint" id="savedAt"></p>
     </div>
   </section>
@@ -188,11 +186,28 @@
 <div id="githubModal" class="modal hidden"><div class="card github-card">
   <div class="explorer-head"><h2>Attach GitHub repository</h2><button type="button" class="icon-btn" id="githubCancelTop" title="Close" aria-label="Close">✕</button></div>
   <p class="hint">Public repositories need no token. For private repos, create a fine-grained token restricted to the repository with <strong>Contents: Read-only</strong>. No write permission is needed. <a href="#" data-url="https://github.com/settings/personal-access-tokens/new">Create token</a></p>
-  <label>Fine-grained GitHub token <small id="githubTokenHelp">Optional for public repos. Desktop stores it encrypted using OS secure storage; web keeps it only in memory until this tab closes.</small><input id="githubTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></label>
+  <label>Fine-grained GitHub token <small id="githubTokenHelp">Optional for public repos. Desktop encrypts it with OS secure storage; web keeps it only in memory until this tab closes.</small><input id="githubTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></label>
   <div class="row github-token-actions"><button class="ghost" id="githubTokenSave">Save &amp; verify token</button><button class="ghost" id="githubTokenClear">Forget token</button><span class="hint github-token-state" id="githubTokenState" aria-live="polite">No GitHub token saved.</span></div>
   <label>Repository URL or owner/repo<input id="githubRepoInput" type="text" autocomplete="url" placeholder="https://github.com/owner/repo"></label>
   <p class="hint github-status" id="githubStatus" aria-live="polite">Not connected — enter a repository to attach its context.</p>
   <div class="row"><button class="big" id="githubFetchBtn">Fetch and attach</button><button class="ghost" id="githubCancel">Cancel</button></div>
+</div></div>
+<div id="replayModal" class="modal hidden"><div class="card explorer-card">
+  <div class="explorer-head">
+    <h2>Volley replay</h2>
+    <button type="button" class="icon-btn" id="replayClose" title="Close" aria-label="Close">✕</button>
+  </div>
+  <p class="hint" id="replayMeta"></p>
+  <div class="row replay-nav">
+    <button class="ghost" id="replayPrev">← Previous</button>
+    <input id="replaySlider" type="range" min="1" max="1" value="1" style="flex:1">
+    <button class="ghost" id="replayNext">Next →</button>
+  </div>
+  <div class="replay-body">
+    <div class="replay-pane"><h3 id="replayDraftHead">Draft</h3><pre id="replayDraft"></pre></div>
+    <div class="replay-pane"><h3 id="replayReviewHead">Review</h3><pre id="replayReview"></pre></div>
+  </div>
+  <div class="row explorer-foot"><button class="ghost" id="replayDownload">⤓ Download HTML</button></div>
 </div></div>
 <div id="toasts" class="toasts"></div>
 <div id="settingsPage" class="settings-page-wrap hidden"><div class="settings-page">
@@ -205,9 +220,9 @@
   </div>
   <div class="settings-grid">
     <h3 class="settings-section">Models</h3>
-    <label>✍ Default Writer AI <small>pre-fills each new volley</small><input id="setWriter" class="model-input" spellcheck="false" placeholder="e.g. google/gemma-4-31b-it:free"></label>
-    <label>🔍 Default Reviewer AI <small>pre-fills each new volley</small><input id="setCritic" class="model-input" spellcheck="false" placeholder="e.g. nvidia/nemotron-3.5-super-vl:free"></label>
-    <label>↯ Fallback model <small>auto-used when a chosen model fails (rate-limits, outages). Blank = none</small><input id="setFallback" class="model-input" spellcheck="false" placeholder="same or a cheaper model"></label>
+    <label>✍ Default Writer AI <small>pre-fills each new volley</small><input id="setWriter" class="model-input" spellcheck="false" placeholder="e.g. google/gemma-4-31b-it:free"><select id="setWriterProvider" class="prov-select" title="Provider powering the Writer" aria-label="Default Writer provider"></select></label>
+    <label>🔍 Default Reviewer AI <small>pre-fills each new volley</small><input id="setCritic" class="model-input" spellcheck="false" placeholder="e.g. nvidia/nemotron-3.5-super-vl:free"><select id="setCriticProvider" class="prov-select" title="Provider powering the Reviewer" aria-label="Default Reviewer provider"></select></label>
+    <label>↯ Fallback model <small>auto-used when a chosen model fails (rate-limits, outages). Blank = none</small><input id="setFallback" class="model-input" spellcheck="false" placeholder="same or a cheaper model"><select id="setFallbackProvider" class="prov-select" title="Provider powering the fallback" aria-label="Fallback provider"></select></label>
     <h3 class="settings-section">Review &amp; context</h3>
     <label>🖼 Reviewer sees attachments
       <select id="setImgMode">
@@ -226,6 +241,9 @@
       <p class="hint key-store-where" id="keyStoreWhere">Where this key is stored…</p>
       <p class="hint" id="keyUsageInfo">OpenRouter key usage is available when a key is saved.</p>
     </div>
+    <h3 class="settings-section">Providers</h3>
+    <p class="hint">Connect your own AI accounts so you're not billed through OpenRouter. Each role above can use a different provider. Keys are stored encrypted on this device only — never sent anywhere but the provider you choose.</p>
+    <div id="providerList" class="provider-list"></div>
   </div>
   <div class="row settings-foot">
     <button class="big" id="btnSaveSettings">Save settings</button>
@@ -237,6 +255,8 @@
 <div class="context-menu hidden" id="contextMenu">
   <div class="menu-item" data-action="rename" data-scope="run">Rename</div>
   <div class="menu-item" data-action="move" data-scope="run">Move to folder…</div>
+  <div class="menu-item" data-action="rerun" data-scope="run">Re-run with same setup</div>
+  <div class="menu-item" data-action="compare" data-scope="run">Compare with…</div>
   <div class="menu-item danger" data-action="delete" data-scope="run">Delete</div>
   <div class="menu-item" data-action="rename-project" data-scope="project">Rename folder</div>
   <div class="menu-item danger" data-action="delete-project" data-scope="project">Delete folder</div>
@@ -248,7 +268,7 @@
   <div class="menu-item" data-send="claude" title="Copy the prompt, then open the Claude desktop app">🤖 Claude — copy + open</div>
   <div class="menu-item" data-send="vscode" title="Copy the prompt, then open VS Code">🟦 VS Code — copy + open</div>
   <div class="menu-item" data-send="cline" title="Copy the prompt and open VS Code, then paste it into the Cline extension">🧩 Cline — copy, open VS Code</div>
-  <div class="menu-item" data-send="hermes" title="Needs the desktop app — a browser page can't start the local Hermes CLI">⚡ Hermes — run locally (desktop app)</div>
+  <div class="menu-item" data-send="hermes" title="Copy the prompt and run it through the local Hermes CLI">⚡ Hermes — run locally</div>
 </div>
 
 <!-- Prompt / confirm dialog. window.prompt() and window.confirm() are not available in
@@ -260,7 +280,17 @@
   <label id="promptField"><span id="promptLabel">Name</span><input id="promptInput" type="text" maxlength="120" spellcheck="false"></label>
   <div class="row"><button class="big" id="promptOk">Save</button><button class="ghost" id="promptCancel">Cancel</button></div>
 </div></div>
+<div id="compareModal" class="modal hidden"><div class="card compare-card">
+  <div class="compare-head"><h2 id="compareTitle">Compare volleys</h2><button class="icon-btn" id="compareClose" title="Close" aria-label="Close comparison">✕</button></div>
+  <p class="hint" id="compareSummary"></p>
+  <label class="check"><input type="checkbox" id="compareDiff" checked> Highlight what changed (right side vs left)</label>
+  <div class="compare-grid">
+    <div class="compare-col"><h3 id="compareHeadA"></h3><div class="compare-meta" id="compareMetaA"></div><pre id="compareTextA"></pre></div>
+    <div class="compare-col"><h3 id="compareHeadB"></h3><div class="compare-meta" id="compareMetaB"></div><pre id="compareTextB"></pre></div>
+  </div>
+</div></div>
 <script src="pv.js"></script>
-
+<script src="helpers.js"></script>
 <script src="app.js"></script>
+<script src="compare.js"></script>
 </body></html>
