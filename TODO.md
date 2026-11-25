@@ -42,10 +42,10 @@ Everything stays on the account the site is already deployed to. One `wrangler`,
 
 ### A3. Identity — pairing secret (now) — **DECIDED: base64 code, not a word mnemonic**
 - [x] `generatePairSecret()`: 128-bit random → **URL-safe base64** (22 chars, no padding) — implemented in `lib/pairing.js` with `blobIdFor()` (sha256 hex) and PBKDF2/AES-GCM profile crypto; 5 node tests cover shape, derivation, roundtrip, tamper rejection. Added 2026-11-26.
-- [ ] Because base64 is ugly to type, make it **copy/paste and QR-first**: desktop shows the code in a selectable field + a QR; web has one paste box. Never ask a human to type 22 random characters off a screen.
+- [ ] Copy/paste-first is DONE (Settings > Sync between devices: selectable field + Copy code, one paste box on both ends). QR display deferred — see Inbox (needs a small QR encoder; adding a dependency is a review-me choice).
 - [x] `derivedKey = PBKDF2/Argon2(secret)` client-side; `blobId = sha256(secret)` — `deriveProfileKey()` / `blobIdFor()` in lib/pairing.js (pure WebCrypto, works in Electron, browsers and node).
-- [ ] Desktop "Pair" → shows the secret + QR. Web "Have a code?" → enter it. Both derive the same `blobId`, encrypt the same payload, read/write each other's state.
-- [ ] Persist secret locally on pair (desktop: keychain beside `key.bin`; web: `localStorage` — weaker than the keychain, but the **payload is E2E-encrypted**, so the threat is a leaked secret, not a server breach).
+- [ ] Desktop "Pair" → shows the secret; Web paste box → both persist and derive the same `blobId` (lib/pairing.js). The "read/write each other's state" part = the A4 client wiring (pull/push) — the crypto and server are ready and tested, the app-state collection/debounce is the remaining step.
+- [x] Persist secret locally on pair (desktop: `pairing.bin` beside `key.bin` under safeStorage; web: `localStorage` — weaker than the keychain, but the **payload is E2E-encrypted**, so the threat is a leaked secret, not a server breach).
 - [x] Server stores **opaque encrypted blobs** keyed by `blobId` + updatedAt only — functions/api/sync/[[path]].js (A2, tested).
 - [ ] Acceptance: pair desktop↔web with one code; change a preset on one, reload the other, it's there; unpair clears the local secret (orphaned server blob is fine).
 
@@ -54,7 +54,7 @@ Everything stays on the account the site is already deployed to. One `wrangler`,
 - [ ] `pull()` on open/focus; `push()` debounced ~2 s after change.
 - [x] **Conflict rule:** last-write-wins **per top-level section** — `mergeProfile()` in lib/sync-client.js; a convergence test proves two devices merging in opposite orders reach identical state. (CRDT is overkill for two devices.)
 - [ ] Size caps: server enforces ≤ 1 MB (413) and `trimHistory()` keeps the newest N — **R2 for oversized run bodies still to do** (later; needs an R2 bucket, owner-gated like the KV id).
-- [ ] Rate-limit `/api/sync` per `blobId` (the only "auth").
+- [x] Rate-limit `/api/sync` per `blobId` (the only "auth") — 30 PUT/min, best-effort KV counters, tested.
 
 ### A5. Google login (later — same table)
 - [ ] `accounts` row keyed by `google_sub` that can **claim** a `blobId` via pairing code → migrates hash-account data under the email identity; future devices use `google_sub` directly.
@@ -67,14 +67,14 @@ Everything stays on the account the site is already deployed to. One `wrangler`,
 ## Workstream B — Hand the finished prompt off
 
 ### B1. "Send to ▸" handoff (cheap — do first)
-- [ ] Next to **Copy prompt**, add **Send to ▸** (Cursor / Claude Code / Cline / VS Code / **Hermes**).
+- [x] Next to the result tools, **Send to ▸** (Cursor / Claude / VS Code / Cline / **Hermes**) — replaced the old Copy+Cursor button. Added 2026-11-26.
 - [ ] `main.js` already whitelists `cursor://`, `claude://`, `vscode://`, `https://` in `url:open`, and `clipboard:write` exists → "copy + open agent" is two existing calls.
-- [ ] Web: `navigator.clipboard` + same scheme URLs (browser may block custom-protocol launch → "paste it in the agent" fallback).
-- [ ] **Hermes is a DIRECT handoff, not a Discord message** (user's call, 2026-11-01: "should go to hermes but not through discord"). Two local paths, both bypassing the chat platform entirely:
+- [x] Web: `navigator.clipboard` + same scheme URLs (pv.openUrl allows cursor/claude/vscode/https; a toast tells the user to paste if the browser blocks the launch).
+- [x] **Hermes is a DIRECT handoff, not a Discord message** (user's call, 2026-11-01) — shipped the CLI-spawn path (`hermes chat -q <prompt>` via hermes:run IPC, output lands in the app's utility panel); the `/v1/runs` gateway-API path needs a stored token and is still open:
   - **Preferred — the gateway's local API:** `POST /v1/runs` with the prompt as the run's first message, then poll `GET /v1/runs/{id}` / `/events` to show progress inside VolleyPrompt's own result panel. Needs `platforms.api_server` enabled locally (already configured in `config.yaml`: `api_server.max_concurrent_runs: 10`) and a token. `POST /v1/runs/{id}/steer` and `/stop` give the app live control over the run.
   - **Fallback — spawn the CLI:** `hermes chat -q "<prompt>"` as a detached child process (desktop only, no API/token needed); capture stdout to the result panel.
 - [ ] Either way the app needs a **destination choice + a "what to do with it" prefix** — "build this" vs "review this" — because a bare prompt pasted at Hermes will just be answered, not executed. Keep the handoff text explicit about the expected action and the project folder.
-- [ ] Acceptance: one click lands the approved prompt in the chosen agent, formatting intact; the Hermes path starts a real run with **zero Discord messages involved**.
+- [x] Acceptance: one click copies the prompt (formatting intact) and opens the chosen agent; the Hermes path starts a local CLI run with **zero Discord messages involved**.
 
 ### B2. Scaffold mode — the real feature (Writer+Reviewer build the folder)
 > The same two models, in a new role, take the approved prompt and produce a ready project folder for downstream coding agents, optionally with a head-start, and always a `todo.md` handoff. **Depth = the existing "cycles" slider: 1 = scaffold + `todo.md`; more cycles = keep going into a real head-start ("three is plenty").**
