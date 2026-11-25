@@ -967,6 +967,43 @@ $('btnVariantCancel').onclick = () => show('variantBox', false);
 $('variantInstruction').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('btnVariantGo').click(); }
 });
+// ---- Pairing (todo A3): one 22-char code shares the encrypted profile across devices.
+async function renderPairStatus() {
+  try {
+    const st = await pv.pairStatus();
+    $('pairSecret').value = st.secret || '';
+    $('pairStatus').textContent = st.paired
+      ? '✓ Paired — this device reads and writes the shared encrypted profile. Copy the code into VolleyPrompt on your other device to sync with it.'
+      : 'Not paired — settings, presets and finished prompts stay on this device.';
+  } catch { $('pairStatus').textContent = 'Pairing is unavailable here.'; }
+}
+$('btnPairGenerate').onclick = async () => {
+  const secret = await pv.pairGenerate();
+  const r = await pv.pairSave(secret);
+  if (!r.ok) return toast(r.message || 'Could not save the pairing code.', 5000);
+  await renderPairStatus();
+  toast('Pairing code created. Copy it into VolleyPrompt on your other device.', 6000);
+};
+$('btnPairCopy').onclick = async () => {
+  const v = $('pairSecret').value;
+  if (!v) return toast('Nothing to copy yet — press Pair first.', 4000);
+  await pv.copy(v);
+  toast('Pairing code copied. Paste it into VolleyPrompt on the other device.', 5000);
+};
+$('btnPairUse').onclick = async () => {
+  const r = await pv.pairSave($('pairPaste').value);
+  if (!r.ok) return toast(r.message || 'That is not a valid pairing code.', 5000);
+  $('pairPaste').value = '';
+  await renderPairStatus();
+  toast('Paired. This device now shares the other device\u2019s synced profile.', 6000);
+};
+$('btnPairClear').onclick = async () => {
+  await pv.pairClear();
+  $('pairSecret').value = '';
+  await renderPairStatus();
+  toast('Unpaired. This device no longer syncs; the encrypted profile on the server is kept.', 6000);
+};
+renderPairStatus();
 // ---- Send to ▸ (todo B1): land the finished prompt in the chosen agent, formatting intact.
 // Every target copies first (the clipboard is the transport), then opens the agent's scheme;
 // Hermes instead runs the prompt through the local CLI via pv.hermesRun().

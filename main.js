@@ -2,8 +2,10 @@ const { app, BrowserWindow, ipcMain, safeStorage, shell, clipboard } = require('
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const nodeCrypto = require('crypto');
 const runsStore = require('./lib/runs-store.js');
 const providerModule = require('./lib/providers.js');
+const pairing = require('./lib/pairing.js');
 
 const API = 'https://openrouter.ai/api/v1';
 const keyFile = () => path.join(app.getPath('userData'), 'key.bin');
@@ -393,6 +395,34 @@ ipcMain.handle('hermes:run', (_e, prompt) => new Promise((resolve) => {
   });
   child.on('close', () => finish());
 }));
+
+// ---- Pairing identity (todo A3): a 22-char secret names this account across devices. ----
+// It lives beside key.bin under OS encryption (safeStorage), like every other credential.
+const pairFile = () => path.join(app.getPath('userData'), 'pairing.bin');
+function loadPairSecret() {
+  try {
+    const buf = fs.readFileSync(pairFile());
+    const raw = safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buf) : buf.toString('utf8');
+    const value = String(raw || '').trim();
+    return pairing.isPairSecret(value) ? value : '';
+  } catch { return ''; } // ENOENT = never paired; anything else reads as "not paired"
+}
+function savePairSecret(secret) {
+  fs.mkdirSync(path.dirname(pairFile()), { recursive: true });
+  if (!secret) { try { fs.unlinkSync(pairFile()); } catch {} return; }
+  fs.writeFileSync(pairFile(), safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(secret) : Buffer.from(secret));
+}
+ipcMain.handle('pair:status', () => { const secret = loadPairSecret(); return { paired: Boolean(secret), secret }; });
+ipcMain.handle('pair:generate', () => pairing.generatePairSecret());
+ipcMain.handle('pair:save', (_e, secret) => {
+  const clean = String(secret || '').trim();
+  if (!pairing.isPairSecret(clean)) {
+    return { ok: false, message: 'A pairing code is 22 letters/digits (- and _ allowed). Copy-paste it — do not retype.' };
+  }
+  savePairSecret(clean);
+  return { ok: true };
+});
+ipcMain.handle('pair:clear', () => { savePairSecret(''); return { ok: true }; });
 // Loads a saved run's final prompt (plus the original idea) so the sidebar history is
 // clickable, not just a list of titles.
 ipcMain.handle('runs:update', (_e, name, patch) => runsStore.updateRun(runsDir(), name, patch));

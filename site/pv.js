@@ -10,6 +10,7 @@
   const API = 'https://openrouter.ai/api/v1';
   const KEY_STORAGE = 'vp_api_key';
   const HISTORY_STORAGE = 'vp_history';
+  const PAIR_STORAGE = 'vp_pair_secret';
   let githubToken = '';
   let githubUsername = '';
   const MAX_HISTORY = 50;
@@ -36,6 +37,12 @@ VERDICT: APPROVE if there are no HIGH issues left, otherwise VERDICT: REVISE.`;
   // Trimmed on read: a key saved with a stray newline/space is rejected by OpenRouter at
   // request time even though it looks fine in the field.
   const loadKey = () => { try { return String(localStorage.getItem(KEY_STORAGE) || '').trim(); } catch { return ''; } };
+  const loadPairSecret = () => {
+    try {
+      const v = String(localStorage.getItem(PAIR_STORAGE) || '').trim();
+      return window.VPPairing && window.VPPairing.isPairSecret(v) ? v : '';
+    } catch { return ''; }
+  };
   const saveKeyLocal = (k) => {
     try { k ? localStorage.setItem(KEY_STORAGE, k) : localStorage.removeItem(KEY_STORAGE); } catch {}
   };
@@ -668,6 +675,18 @@ VERDICT: APPROVE if there are no HIGH issues left, otherwise VERDICT: REVISE.`;
     // "Send to ▸ Hermes" needs a local CLI; a browser page cannot start one. The UI copies
     // the prompt first, so this message can point the user at the desktop app.
     hermesRun: async () => ({ ok: false, message: "Hermes handoff runs in the desktop app (a browser page can't start local CLIs). The prompt is on your clipboard — paste it into a terminal running: hermes chat" }),
+    // Pairing / sync identity (todo A3): the code lives in localStorage (weaker than the
+    // desktop keychain, but the synced payload itself is E2E-encrypted — the threat is a
+    // leaked code, not a server breach, per the todo).
+    pairStatus: async () => { const secret = loadPairSecret(); return { paired: Boolean(secret), secret }; },
+    pairGenerate: async () => VPPairing.generatePairSecret(),
+    pairSave: async (secret) => {
+      const clean = String(secret || '').trim();
+      if (!VPPairing.isPairSecret(clean)) return { ok: false, message: 'A pairing code is 22 letters/digits (- and _ allowed). Copy-paste it — do not retype.' };
+      try { localStorage.setItem(PAIR_STORAGE, clean); return { ok: true }; }
+      catch { return { ok: false, message: 'This browser refused to store the code (private mode can do this).' }; }
+    },
+    pairClear: async () => { try { localStorage.removeItem(PAIR_STORAGE); } catch {} return { ok: true }; },
     // Reads one saved volley (sidebar click). Desktop: lib/runs-store.readRun; web: localStorage.
     openRun: async (name) => openRun(name),
     // Provider surfaces for the unified settings UI. The web speaks OpenRouter only; the other

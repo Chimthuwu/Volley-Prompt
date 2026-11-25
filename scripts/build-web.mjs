@@ -99,10 +99,12 @@ if (!html.includes('Clear local history')) {
 }
 
 // 6. Load the web bridge first, then the shared helpers and compare modal (renderer/index.html
-// already loads them; the copies land in site/ below).
+// already loads them; the copies land in site/ below). pairing.js must precede pv.js, which
+// reads window.VPPairing.
 html = html.replace(/(<script src="helpers\.js"><\/script>)/, '<script src="pv.js"></script>\n$1');
-if (!html.includes('<script src="pv.js"></script>')) {
-  console.error('build-web: pv.js script injection did not apply');
+html = html.replace(/(<script src="pv\.js"><\/script>)/, '<script src="pairing.js"></script>\n$1');
+if (!html.includes('<script src="pv.js"></script>') || !html.includes('<script src="pairing.js"></script>')) {
+  console.error('build-web: script injection did not apply');
   failures++;
 }
 
@@ -125,5 +127,6 @@ write('site/app.js', appJs);
 write('site/style.css', styleCss);
 write('site/helpers.js', read('renderer/helpers.js'));
 write('site/compare.js', read('renderer/compare.js'));
+write('site/pairing.js', read('lib/pairing.js'));
 write('site/index.html', html);
-console.log(`build-web: site/app.js ${appJs.length} B, site/style.css ${styleCss.length} B, site/helpers.js + compare.js copied, site/index.html ${html.length} B written (${ids.size} app ids checked)`);
+console.log(`build-web: site/app.js ${appJs.length} B, site/style.css ${styleCss.length} B, site/helpers.js + compare.js + pairing.js copied, site/index.html ${html.length} B written (${ids.size} app ids checked)`);
