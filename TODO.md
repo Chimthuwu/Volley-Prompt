@@ -29,9 +29,9 @@ Hard rule: **the OpenRouter API key never syncs to the server.** It stays device
 ## Workstream A — Synced accounts (web ⇄ desktop)
 
 ### A1. Unified frontend (do first — it's the tax on everything)
-- [ ] Make `renderer/` and `site/` share **one** source for `app.js`/`store.js`/styles (build step emits both, or web loads the same files Electron uses). Kill the hand-copied fork.
-- [ ] Confirm `window.pv` is the *only* environment-specific surface; everything Electron-vs-web divergent routes through it.
-- [ ] Acceptance: editing UI logic once updates both the desktop build and the deployed site; `npm run dist` and `npm run site:deploy` both pick it up.
+- [x] Make `renderer/` and `site/` share **one** source for `app.js`/`store.js`/styles (build step emits both, or web loads the same files Electron uses). Kill the hand-copied fork. — `scripts/build-web.mjs` (`npm run build:web`, also run by `site:deploy`) emits site/app.js, site/style.css, site/helpers.js, site/compare.js from renderer/ and adapts site/index.html. Added 2026-11-26.
+- [x] Confirm `window.pv` is the *only* environment-specific surface; everything Electron-vs-web divergent routes through it. — site/pv.js gained openRun + the provider surfaces (web is OpenRouter-only); the build script verifies every id app.js queries exists in the emitted HTML.
+- [x] Acceptance: editing UI logic once updates both the desktop build and the deployed site; `npm run dist` and `npm run site:deploy` both pick it up. — both scripts now emit from renderer/; the *deployed* site still needs the owner-gated `npm run site:deploy` ([!]) to pick it up.
 
 ### A2. Backend — **DECIDED (2026-11-01): Cloudflare. Supabase is off the table.**
 Everything stays on the account the site is already deployed to. One `wrangler`, one dashboard, no third-party vendor holding your data.
