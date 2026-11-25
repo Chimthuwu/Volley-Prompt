@@ -79,17 +79,18 @@ Everything stays on the account the site is already deployed to. One `wrangler`,
 ### B2. Scaffold mode — the real feature (Writer+Reviewer build the folder)
 > The same two models, in a new role, take the approved prompt and produce a ready project folder for downstream coding agents, optionally with a head-start, and always a `todo.md` handoff. **Depth = the existing "cycles" slider: 1 = scaffold + `todo.md`; more cycles = keep going into a real head-start ("three is plenty").**
 
-- [ ] **Structured output mode:** add `SCAFFOLD_AUTHOR_SYSTEM` → "Emit a JSON file manifest `[{path, content}]`"; `SCAFFOLD_CRITIC_SYSTEM` reviews the manifest (missing dirs? no README? todo not actionable?) and revises. Reuse the round/verdict machinery — only "what a draft is" changes (a manifest, not prose).
-- [ ] **Depth semantics — predictable, not "the model decides":**
+- [x] **Structured output mode:** add `SCAFFOLD_AUTHOR_SYSTEM` → "Emit a JSON file manifest `[{path, content}]`"; `SCAFFOLD_CRITIC_SYSTEM` reviews the manifest (missing dirs? no README? todo not actionable?) and revises. Reuse the round/verdict machinery — only "what a draft is" changes (a manifest, not prose). — DONE 2026-11-26: lib/scaffold.js (both systems, parseManifest with path/size/secret validation, verdictOf reuses FITNESS SCORE/VERDICT), scaffold:call IPC + site/pv.js web path, REVISE → one revision pass with the reviewer text (tested in test/scaffold.test.js + tests/scaffold-ui.test.js).
+- [x] **Depth semantics — predictable, not "the model decides":**
   - cycle 1 — create folder; write structure + config + `PROMPT.md` (approved prompt) + `todo.md` (handoff).
   - cycle 2 — fill stub files / entry points / data models (still skeleton, opens clean).
   - cycle 3 — real head-start: implement the first milestone end-to-end. (Cap at the slider max already used.)
-- [ ] **The `todo.md` handoff** is the deliverable: the scaffold writes a project `todo.md` (milestones, files to create, the volley's constraints) so the *next* agent (Hermes / Claude Code / Cursor) picks up cold. Mirror the shape of this very file.
+  — DONE 2026-11-26: `cycleGoal()` encodes exactly this, cycles = the rounds slider clamped 1..8, the depth is stated in the model-facing content, and PROMPT.md + todo.md are injected deterministically regardless of the model's whim.
+- [x] **The `todo.md` handoff** is the deliverable: the scaffold writes a project `todo.md` (milestones, files to create, the volley's constraints) so the *next* agent (Hermes / Claude Code / Cursor) picks up cold. Mirror the shape of this very file. — DONE 2026-11-26: `buildTodoMd()` (milestone checkboxes, constraint extraction, created-file list, install notes) is always written as todo.md; covered by test/scaffold.test.js.
 - [ ] **Filesystem constraint:**
-  - *Desktop:* write to a user-picked folder (`dialog.showOpenDialog`/`showSaveDialog` — Electron has it).
-  - *Web:* browsers can't silently make folders → **File System Access API** (`showDirectoryPicker`) on Chrome/Edge; else produce a **`.zip`** download of the manifest; else write into the synced profile and let the desktop materialize it (ties to A).
-- [ ] **Guardrails:** write *nothing* until the user picks a destination; preview ("about to create 14 files in `X`") with Confirm; never overwrite a non-empty dir without an explicit merge prompt.
-- [ ] Acceptance: an approved prompt → a folder that opens in an IDE with `PROMPT.md`, `todo.md`, and (per cycle count) working stubs, produced by the same two models, no manual copy-paste.
+  - *Desktop:* write to a user-picked folder (`dialog.showOpenDialog` — Electron has it). ✅ scaffold:pickDir + scaffold:write (re-validates paths, refuses to write outside the folder).
+  - *Web:* Chromium **File System Access API** (`showDirectoryPicker` mode:'readwrite') ✅ in site/pv.js; else produce a **`.zip`** download of the manifest — **STILL TO DO** (needs a small store-only zip encoder or a vendored lib; adding a dependency is a review-me choice). "Write into the synced profile" not needed now that pickDir works on Chromium.
+- [x] **Guardrails:** write *nothing* until the user picks a destination; preview ("about to create 14 files in `X`") with Confirm; never overwrite a non-empty dir without an explicit merge prompt. — DONE 2026-11-26: preview modal locked until a destination is picked; non-empty folder → askConfirm "Merge into it?" before overwrite:true; server/transport-side path re-validation and out-of-folder refusal. Tested in tests/scaffold-ui.test.js.
+- [!] Acceptance: an approved prompt → a folder that opens in an IDE with `PROMPT.md`, `todo.md`, and (per cycle count) working stubs, produced by the same two models, no manual copy-paste. — the FULL loop is verified offline (jsdom: fake model replies drive the real renderer loop, preview, guardrails and write contract; 103 unit tests green), but the LIVE end-to-end pass makes real billed model calls with the user's OpenRouter key — owner-gated spend, same gate as the smoke-test item below.
 
 ---
 
