@@ -2,5 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "volleyprompt",
   "compatibility_date": "2025-01-01",
-  "assets": { "directory": "./site" }
+  "assets": { "directory": "./site" },
+  // Sync backend (todo A2): functions/api/sync/[[path]].js stores one opaque encrypted blob per
+  // account in the SYNC_KV namespace. One-time owner setup (needs wrangler login):
+  //   npx wrangler kv namespace create SYNC
+  // then paste the returned namespace id below and `npm run site:deploy` ships the API with the
+  // site. Until the binding exists the endpoint answers 503 "sync storage is not configured yet".
+  "kv_namespaces": [
+    { "binding": "SYNC_KV", "id": "00000000000000000000000000000000" }
+  ]
 }

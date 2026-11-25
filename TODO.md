@@ -35,10 +35,10 @@ Hard rule: **the OpenRouter API key never syncs to the server.** It stays device
 
 ### A2. Backend — **DECIDED (2026-11-01): Cloudflare. Supabase is off the table.**
 Everything stays on the account the site is already deployed to. One `wrangler`, one dashboard, no third-party vendor holding your data.
-- [ ] **Pages Functions** (ships in the same deploy as `./site`) serve `/api/sync/*`.
-- [ ] **KV** holds the encrypted profile blob (opaque to the server); **R2** holds oversized run bodies with pointers left in KV; **D1** only if history needs querying rather than whole-blob reads.
-- [ ] **No Supabase** (user's call, 2026-11-01). Do not reintroduce it as a shortcut when Google login comes up — real accounts then = Google OAuth verified **in a Pages Function** (`google_sub` → account row), still on Cloudflare, still no vendor in the data path.
-- [ ] Add `functions/` to the Pages project so the API and the static site deploy together.
+- [x] **Pages Functions** (ships in the same deploy as `./site`) serve `/api/sync/*` — `functions/api/sync/[[path]].js`, GET/PUT/DELETE of one opaque blob per account, unit-tested against a mock KV (test/sync-function.test.js). Added 2026-11-26.
+- [ ] **KV** holds the encrypted profile blob (opaque to the server); **R2** holds oversized run bodies with pointers left in KV; **D1** only if history needs querying rather than whole-blob reads. — the KV *binding* needs the owner to run `npx wrangler kv namespace create SYNC` once and paste the id into wrangler.jsonc (`[!]` needs wrangler auth); until then the endpoint answers 503.
+- [x] **No Supabase** (user's call, 2026-11-01). Do not reintroduce it as a shortcut when Google login comes up — real accounts then = Google OAuth verified **in a Pages Function** (`google_sub` → account row), still on Cloudflare, still no vendor in the data path.
+- [x] Add `functions/` to the Pages project so the API and the static site deploy together — `wrangler pages deploy site` picks up `functions/` automatically; `site:deploy` now also runs `build:web` first.
 
 ### A3. Identity — pairing secret (now) — **DECIDED: base64 code, not a word mnemonic**
 - [ ] `generatePairSecret()`: 128-bit random → **URL-safe base64** (e.g. 22 chars, no padding). Chosen over a 12-word mnemonic on 2026-11-01. Entropy is what matters — a short "hash" is guessable and would let anyone read the blob.
