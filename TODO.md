@@ -68,12 +68,12 @@ Everything stays on the account the site is already deployed to. One `wrangler`,
 
 ### B1. "Send to ▸" handoff (cheap — do first)
 - [x] Next to the result tools, **Send to ▸** (Cursor / Claude / VS Code / Cline / **Hermes**) — replaced the old Copy+Cursor button. Added 2026-11-26.
-- [ ] `main.js` already whitelists `cursor://`, `claude://`, `vscode://`, `https://` in `url:open`, and `clipboard:write` exists → "copy + open agent" is two existing calls.
+- [x] `main.js` already whitelists `cursor://`, `claude://`, `vscode://`, `https://` in `url:open`, and `clipboard:write` exists → "copy + open agent" is two existing calls. — verified 2026-11-26 (main.js url:open regex + the Send-to handler uses pv.copy then pv.openUrl).
 - [x] Web: `navigator.clipboard` + same scheme URLs (pv.openUrl allows cursor/claude/vscode/https; a toast tells the user to paste if the browser blocks the launch).
 - [x] **Hermes is a DIRECT handoff, not a Discord message** (user's call, 2026-11-01) — shipped the CLI-spawn path (`hermes chat -q <prompt>` via hermes:run IPC, output lands in the app's utility panel); the `/v1/runs` gateway-API path needs a stored token and is still open:
   - **Preferred — the gateway's local API:** `POST /v1/runs` with the prompt as the run's first message, then poll `GET /v1/runs/{id}` / `/events` to show progress inside VolleyPrompt's own result panel. Needs `platforms.api_server` enabled locally (already configured in `config.yaml`: `api_server.max_concurrent_runs: 10`) and a token. `POST /v1/runs/{id}/steer` and `/stop` give the app live control over the run.
   - **Fallback — spawn the CLI:** `hermes chat -q "<prompt>"` as a detached child process (desktop only, no API/token needed); capture stdout to the result panel.
-- [ ] Either way the app needs a **destination choice + a "what to do with it" prefix** — "build this" vs "review this" — because a bare prompt pasted at Hermes will just be answered, not executed. Keep the handoff text explicit about the expected action and the project folder.
+- [x] Either way the app needs a **destination choice + a "what to do with it" prefix** — "build this" vs "review this" — because a bare prompt pasted at Hermes will just be answered, not executed. Keep the handoff text explicit about the expected action and the project folder. — DONE 2026-11-26: Send-to ▸ menu gained an intent chooser (Build it / Review it / Answer only, remembered per device in `sendIntent`); build/review prepend an explicit Task: line + the volley's project folder, the prompt body itself is untouched.
 - [x] Acceptance: one click copies the prompt (formatting intact) and opens the chosen agent; the Hermes path starts a local CLI run with **zero Discord messages involved**.
 
 ### B2. Scaffold mode — the real feature (Writer+Reviewer build the folder)

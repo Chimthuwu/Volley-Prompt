@@ -1103,13 +1103,46 @@ document.addEventListener('click', (e) => {
   closeSendMenu();
 });
 sendMenu.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSendMenu(); });
+// Intent chooser (todo B1 L76): "what to do with it" — a bare prompt pasted at an agent just
+// gets ANSWERED; build/review make the expected action explicit. Remembered across sessions.
+const SEND_INTENT_KEY = 'sendIntent';
+const readSendIntent = () => {
+  const v = store.get(SEND_INTENT_KEY, 'build');
+  return v === 'review' || v === 'answer' ? v : 'build';
+};
+const paintSendIntent = (intent) => {
+  for (const btn of sendMenu.querySelectorAll('.intent-btn')) {
+    btn.classList.toggle('active', btn.dataset.intent === intent);
+  }
+};
+paintSendIntent(readSendIntent());
+sendMenu.addEventListener('click', (e) => {
+  const btn = e.target.closest('.intent-btn');
+  if (!btn) return;
+  const intent = btn.dataset.intent;
+  store.set(SEND_INTENT_KEY, intent); // synced key? no — device-local habit, keep it out of SYNC_ALL_KEYS
+  paintSendIntent(intent);
+});
+// Wraps the finished prompt with the chosen intent so the receiving agent acts on it
+// instead of just answering. The prompt body itself is never modified.
+function buildHandoffPrompt(intent) {
+  const prompt = $('final').value;
+  if (!prompt.trim()) return '';
+  if (intent === 'answer') return prompt;
+  const project = (lastRunMeta?.project || '').trim();
+  const projectLine = project ? `Project: ${project}\n` : '';
+  if (intent === 'review') {
+    return `Task: REVIEW — critique the brief below for feasibility, gaps and risks. Do NOT implement it.\n${projectLine}\n${prompt}`;
+  }
+  return `Task: BUILD — implement the brief below end to end in a project folder. Do not just discuss it.${project ? `\n${projectLine}` : '\n'}\n${prompt}`;
+}
 const SEND_TARGETS = { cursor: 'Cursor', claude: 'Claude', vscode: 'VS Code', cline: 'Cline' };
 sendMenu.addEventListener('click', async (e) => {
   const item = e.target.closest('.menu-item');
   if (!item) return;
   closeSendMenu();
   const kind = item.dataset.send;
-  const prompt = $('final').value;
+  const prompt = buildHandoffPrompt(readSendIntent());
   if (!prompt.trim()) { toast('Nothing to send — the prompt is empty.', 4000); return; }
   await pv.copy(prompt);
   if (kind === 'hermes') {

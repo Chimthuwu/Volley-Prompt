@@ -270,6 +270,11 @@
 
 <!-- Send to ▸ (todo B1): one click copies the finished prompt and hands it to the chosen agent. -->
 <div id="sendMenu" class="context-menu hidden" style="min-width:220px">
+  <div class="send-intent" title="What should the receiving agent DO with this prompt? A bare prompt just gets answered — build/review make the expectation explicit.">
+    <button type="button" class="intent-btn active" data-intent="build">Build it</button>
+    <button type="button" class="intent-btn" data-intent="review">Review it</button>
+    <button type="button" class="intent-btn" data-intent="answer">Answer only</button>
+  </div>
   <div class="menu-item" data-send="cursor" title="Copy the prompt, then open Cursor">↗ Cursor — copy + open</div>
   <div class="menu-item" data-send="claude" title="Copy the prompt, then open the Claude desktop app">🤖 Claude — copy + open</div>
   <div class="menu-item" data-send="vscode" title="Copy the prompt, then open VS Code">🟦 VS Code — copy + open</div>

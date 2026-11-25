@@ -49,6 +49,14 @@
 
     let profile = null;          // last-known merged profile (this device's truth)
     let lastPushedJson = null;   // exact bytes last accepted by the server
+    const maxHistory = Number.isFinite(options?.maxHistory) ? options.maxHistory : 200;
+    // todo A4 size caps: the history section (if a host collects one) never ships more
+    // than the newest N entries, so the blob stays well under the server's 1 MB cap.
+    const trimForPush = (p) => {
+      const hist = p?.sections?.history;
+      if (!hist || !Array.isArray(hist.data) || hist.data.length <= maxHistory) return p;
+      return { sections: { ...p.sections, history: { updatedAt: hist.updatedAt, data: hist.data.slice(0, maxHistory) } } };
+    };
     let applying = false;        // suppress markChanged() while adopting remote data
     let pushTimer = null;
     let lastPullAt = 0;
@@ -102,6 +110,7 @@
       try {
         profile = restampChanged(new Date().toISOString());
         if (!profile || !Object.keys(profile.sections).length) return true;
+        profile = trimForPush(profile);
         const json = JSON.stringify(profile);
         if (json === lastPushedJson) return true; // nothing changed since the last accepted push
         const ok = await transport.push(clone(profile));
