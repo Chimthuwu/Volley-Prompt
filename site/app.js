@@ -763,6 +763,9 @@ $('versionSlider').oninput = () => {
   $('final').value = snap.draft;
   $('fitnessScore').textContent = `Fitness: ${snap.score == null ? '—' : `${snap.score}/100`} · ${snap.verdict || ''}`;
   $('versionLabel').textContent = `Round ${snap.round}`;
+  // Scrubbing rounds keeps the models visible (the volley's Writer/Reviewer pair).
+  const mp = lastRunMeta ? { author: lastRunMeta.author, critic: lastRunMeta.critic } : null;
+  $('modelInfo').textContent = mp && mp.author ? `Models: Writer ${mp.author} · Reviewer ${mp.critic}` : $('modelInfo').textContent;
 };
 async function runUtility(kind, instruction = '') {
   const model = MODEL_ROWS.find((r) => r.id === (lastRunMeta?.author || $('author').value)) || MODEL_ROWS.find((r) => r.isFree) || MODEL_ROWS[0];
@@ -1658,7 +1661,7 @@ async function loadHistory() {
       el.className = 'hist-item';
       el.dataset.path = r.path;
       el.dataset.id = r.name; // For context menu / drag-drop referencing
-      el.title = `${stamp}\n✎ rename · 📁 move · 🗑 delete (also on right-click)`; // r.title is user-controlled — never into innerHTML/attributes unescaped
+      el.title = `${stamp}${r.meta?.modelPair ? `\nWriter ${r.meta.modelPair.author} · Reviewer ${r.meta.modelPair.critic}` : ''}\n✎ rename · 📁 move · 🗑 delete (also on right-click)`; // r.title is user-controlled — never into innerHTML/attributes unescaped
       const title = document.createElement('span');
       title.className = 'hist-title';
       title.textContent = (r.incomplete ? '✂ ' : '') + (r.title || stamp)

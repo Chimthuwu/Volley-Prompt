@@ -933,6 +933,9 @@ $('versionSlider').oninput = () => {
   $('final').value = snap.draft;
   $('fitnessScore').textContent = `Fitness: ${snap.score == null ? '—' : `${snap.score}/100`} · ${snap.verdict || ''}`;
   $('versionLabel').textContent = `Round ${snap.round}`;
+  // Scrubbing rounds keeps the models visible (the volley's Writer/Reviewer pair).
+  const mp = lastRunMeta ? { author: lastRunMeta.author, critic: lastRunMeta.critic } : null;
+  $('modelInfo').textContent = mp && mp.author ? `Models: Writer ${mp.author} · Reviewer ${mp.critic}` : $('modelInfo').textContent;
 };
 async function runUtility(kind, instruction = '') {
   const provider = $('authorProvider')?.value || 'openrouter';
@@ -1884,7 +1887,8 @@ async function loadHistory() {
       el.dataset.path = r.path;
       el.dataset.id = r.name; // For context menu / drag-drop referencing
       el.tabIndex = 0;
-      el.title = `${stamp}\nF2 rename · Delete remove · Enter open`; // r.title is user-controlled: never into innerHTML
+      const mp = r.meta?.modelPair;
+      el.title = `${stamp}${mp ? `\nWriter ${mp.author} · Reviewer ${mp.critic}` : ''}\nF2 rename · Delete remove · Enter open`; // r.title is user-controlled: never into innerHTML
       const title = document.createElement('span');
       title.className = 'hist-title';
       title.textContent = (r.incomplete ? '✂ ' : '') + (r.title || stamp)
