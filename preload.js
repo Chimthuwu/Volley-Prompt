@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('pv', {
   hermesRun: inv('hermes:run'),
   // Pairing / sync identity (todo A3): one 22-char secret shares the profile across devices.
   pairStatus: inv('pair:status'), pairGenerate: inv('pair:generate'), pairSave: inv('pair:save'), pairClear: inv('pair:clear'),
+  // Sync transport (todo A4): crypto + HTTPS to the site API happen in the main process;
+  // the renderer just hands over / receives the plain profile object.
+  syncPull: inv('sync:pull'), syncPush: inv('sync:push'),
   githubTokenInfo: inv('github:token:has'), saveGithubToken: inv('github:token:set'), clearGithubToken: inv('github:token:clear'), fetchGithubRepo: inv('github:repo:fetch'),
   // Multi-provider support
   providersList: inv('providers:list'), providersStatus: inv('providers:status'),

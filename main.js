@@ -423,6 +423,60 @@ ipcMain.handle('pair:save', (_e, secret) => {
   return { ok: true };
 });
 ipcMain.handle('pair:clear', () => { savePairSecret(''); return { ok: true }; });
+
+// ---- Sync transport (todo A4): the DESKTOP half of pull/push. ----
+// The renderer owns local state (its localStorage) and the sync-engine loop; this side
+// only does crypto (pairing secret -> key) and HTTPS against the deployed site's API.
+// The same origin the site ships from; overridable for local dev against `wrangler pages dev`.
+const SYNC_ENDPOINT = process.env.VP_SYNC_URL || 'https://volley-prompt.pages.dev/api/sync/';
+const SYNC_TIMEOUT_MS = 20000;
+
+async function syncKey() {
+  const secret = loadPairSecret();
+  if (!secret) return { secret: '', key: null, blobId: '' };
+  const key = await pairing.deriveProfileKey(secret);
+  const blobId = await pairing.blobIdFor(secret);
+  return { secret, key, blobId };
+}
+
+function syncFetch(url, init) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), SYNC_TIMEOUT_MS);
+  return fetch(url, { ...init, signal: ctl.signal }).finally(() => clearTimeout(timer));
+}
+
+ipcMain.handle('sync:pull', async () => {
+  const { key, blobId } = await syncKey();
+  if (!key) return { ok: false, code: 'nopair' };
+  try {
+    const res = await syncFetch(SYNC_ENDPOINT + blobId, { method: 'GET' });
+    if (res.status === 404) return { ok: true, profile: null }; // empty account — engine seeds it
+    if (!res.ok) return { ok: false, code: 'http', status: res.status, message: `sync server ${res.status}` };
+    const stored = await res.json();
+    const profile = await pairing.decryptProfile(key, stored.blob || {});
+    return { ok: true, profile };
+  } catch (e) {
+    return { ok: false, code: 'error', message: e && e.message ? e.message : String(e) };
+  }
+});
+
+ipcMain.handle('sync:push', async (_e, profile) => {
+  const { key, blobId } = await syncKey();
+  if (!key) return { ok: false, code: 'nopair' };
+  try {
+    const blob = await pairing.encryptProfile(key, profile);
+    const res = await syncFetch(SYNC_ENDPOINT + blobId, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(blob),
+    });
+    if (res.status === 429) return { ok: false, code: 'ratelimit', message: 'sync rate limited — will retry' };
+    if (!res.ok) return { ok: false, code: 'http', status: res.status, message: `sync server ${res.status}` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, code: 'error', message: e && e.message ? e.message : String(e) };
+  }
+});
 // Loads a saved run's final prompt (plus the original idea) so the sidebar history is
 // clickable, not just a list of titles.
 ipcMain.handle('runs:update', (_e, name, patch) => runsStore.updateRun(runsDir(), name, patch));

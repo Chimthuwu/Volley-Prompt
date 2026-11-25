@@ -27,6 +27,7 @@ const RENDERER_PV_CALLS = [
   'pv.projects(', 'pv.renameProject(', 'pv.deleteProject(',
   'pv.hermesRun(',
   'pv.pairStatus(', 'pv.pairGenerate(', 'pv.pairSave(', 'pv.pairClear(',
+  'pv.syncPull(', 'pv.syncPush(',
 ];
 
 test('renderer only calls pv methods that preload exposes', () => {

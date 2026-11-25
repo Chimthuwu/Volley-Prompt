@@ -687,6 +687,43 @@ VERDICT: APPROVE if there are no HIGH issues left, otherwise VERDICT: REVISE.`;
       catch { return { ok: false, message: 'This browser refused to store the code (private mode can do this).' }; }
     },
     pairClear: async () => { try { localStorage.removeItem(PAIR_STORAGE); } catch {} return { ok: true }; },
+    // Sync transport (todo A4), web half: same-origin /api/sync/<blobId>, key derived
+    // from the pairing secret in localStorage. Same contract as the desktop IPC surface.
+    syncPull: async () => {
+      const secret = loadPairSecret();
+      if (!secret) return { ok: false, code: 'nopair' };
+      try {
+        const key = await VPPairing.deriveProfileKey(secret);
+        const blobId = await VPPairing.blobIdFor(secret);
+        const res = await fetch(`/api/sync/${blobId}`, { method: 'GET' });
+        if (res.status === 404) return { ok: true, profile: null };
+        if (!res.ok) return { ok: false, code: 'http', status: res.status, message: `sync server ${res.status}` };
+        const stored = await res.json();
+        const profile = await VPPairing.decryptProfile(key, stored.blob || {});
+        return { ok: true, profile };
+      } catch (e) {
+        return { ok: false, code: 'error', message: e && e.message ? e.message : String(e) };
+      }
+    },
+    syncPush: async (profile) => {
+      const secret = loadPairSecret();
+      if (!secret) return { ok: false, code: 'nopair' };
+      try {
+        const key = await VPPairing.deriveProfileKey(secret);
+        const blobId = await VPPairing.blobIdFor(secret);
+        const blob = await VPPairing.encryptProfile(key, profile);
+        const res = await fetch(`/api/sync/${blobId}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(blob),
+        });
+        if (res.status === 429) return { ok: false, code: 'ratelimit', message: 'sync rate limited — will retry' };
+        if (!res.ok) return { ok: false, code: 'http', status: res.status, message: `sync server ${res.status}` };
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, code: 'error', message: e && e.message ? e.message : String(e) };
+      }
+    },
     // Reads one saved volley (sidebar click). Desktop: lib/runs-store.readRun; web: localStorage.
     openRun: async (name) => openRun(name),
     // Provider surfaces for the unified settings UI. The web speaks OpenRouter only; the other

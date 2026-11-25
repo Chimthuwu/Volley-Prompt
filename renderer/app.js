@@ -982,6 +982,7 @@ $('btnPairGenerate').onclick = async () => {
   const r = await pv.pairSave(secret);
   if (!r.ok) return toast(r.message || 'Could not save the pairing code.', 5000);
   await renderPairStatus();
+  if (syncEngine) { syncEngine.pullNowForced(); } // new secret → new account; seed it now
   toast('Pairing code created. Copy it into VolleyPrompt on your other device.', 6000);
 };
 $('btnPairCopy').onclick = async () => {
@@ -995,16 +996,95 @@ $('btnPairUse').onclick = async () => {
   if (!r.ok) return toast(r.message || 'That is not a valid pairing code.', 5000);
   $('pairPaste').value = '';
   await renderPairStatus();
+  if (syncEngine) { syncEngine.pullNowForced(); } // pull the profile this code points at, now
   toast('Paired. This device now shares the other device\u2019s synced profile.', 6000);
 };
 $('btnPairClear').onclick = async () => {
   await pv.pairClear();
   $('pairSecret').value = '';
+  if (syncEngine) { syncEngine.stop(); } // no secret → the transport can only fail; stop the loop
   await renderPairStatus();
   toast('Unpaired. This device no longer syncs; the encrypted profile on the server is kept.', 6000);
 };
 renderPairStatus();
-// ---- Send to ▸ (todo B1): land the finished prompt in the chosen agent, formatting intact.
+
+// ---- Sync loop (todo A4): pull on open/focus; push debounced ~2 s after a change. ----
+// Collects the localStorage-backed sections the two builds share (the run history stays
+// device-local for now: desktop keeps it on disk via runs-store, web in vp_history —
+// syncing it is its own task). The transport (crypto + HTTP) differs per platform:
+// desktop = pv.syncPull/syncPush IPC into main.js, web = same-origin fetch in site/pv.js.
+const SYNC_JSON_SECTIONS = { settings: 'vpSettings', presets: 'vpPresets', modelPairs: 'vpModelPairs' };
+const SYNC_COMPOSER_KEYS = ['author', 'critic', 'rounds', 'outputMode', 'idea', 'auto', 'authorProvider', 'criticProvider'];
+const SYNC_THEME_KEYS = { hue: 'themeHue', sat: 'themeSat', contrast: 'themeContrast' };
+const SYNC_ALL_KEYS = new Set([...Object.values(SYNC_JSON_SECTIONS), ...SYNC_COMPOSER_KEYS, ...Object.values(SYNC_THEME_KEYS)]);
+const rawStoreSet = store.set.bind(store);
+const collectSyncState = () => {
+  const out = {};
+  for (const [section, key] of Object.entries(SYNC_JSON_SECTIONS)) {
+    try { const v = JSON.parse(store.get(key, 'null')); if (v !== null && typeof v === 'object') out[section] = v; } catch { /* ignore local corruption */ }
+  }
+  const composer = {};
+  for (const k of SYNC_COMPOSER_KEYS) composer[k] = store.get(k, '');
+  out.composer = composer;
+  const theme = {};
+  for (const [k, key] of Object.entries(SYNC_THEME_KEYS)) theme[k] = store.get(key, '');
+  out.theme = theme;
+  return out;
+};
+function applySyncPatch(patch) {
+  for (const [section, data] of Object.entries(patch || {})) {
+    if (section === 'settings') rawStoreSet('vpSettings', JSON.stringify(data || {}));
+    else if (section === 'presets') rawStoreSet('vpPresets', JSON.stringify(data || {}));
+    else if (section === 'modelPairs') rawStoreSet('vpModelPairs', JSON.stringify(data || {}));
+    else if (section === 'composer' && data && typeof data === 'object') {
+      for (const [k, v] of Object.entries(data)) rawStoreSet(k, v === undefined || v === null ? '' : String(v));
+      // Refresh the visible fields unless the user is typing into that exact field.
+      for (const k of SYNC_COMPOSER_KEYS) {
+        const el = $(k);
+        if (!el || document.activeElement === el) continue;
+        const v = store.get(k, '');
+        if (el.type === 'checkbox') el.checked = v === '1';
+        else if (el.value !== v) el.value = v;
+      }
+    } else if (section === 'theme' && data && typeof data === 'object') {
+      const { hue = '0', sat = '100', contrast = '100' } = data;
+      rawStoreSet('themeHue', String(hue)); rawStoreSet('themeSat', String(sat)); rawStoreSet('themeContrast', String(contrast));
+      const active = document.activeElement;
+      if (![hueInput, satInput, contrastInput].includes(active)) {
+        hueInput.value = String(hue); satInput.value = String(sat); contrastInput.value = String(contrast);
+        applyTheme({ hue: +hue, sat: +sat, contrast: +contrast });
+      }
+    }
+  }
+}
+const syncEngine = (typeof window !== 'undefined' && window.VPSyncEngine && pv.syncPull)
+  ? window.VPSyncEngine.createSyncEngine({
+      collect: collectSyncState,
+      apply: applySyncPatch,
+      transport: {
+        pull: async () => {
+          const r = await pv.syncPull();
+          if (!r.ok) throw new Error(r.message || r.code || 'sync pull failed');
+          return r.profile;
+        },
+        push: async (profile) => {
+          const r = await pv.syncPush(profile);
+          return !!r.ok;
+        },
+      },
+      log: (m) => console.info('[sync]', m),
+    })
+  : null;
+if (syncEngine) {
+  // Any synced-key save (wrapped below) schedules the debounced push; focus events pull.
+  store.set = (k, v) => {
+    rawStoreSet(k, v);
+    if (SYNC_ALL_KEYS.has(k)) syncEngine.markChanged();
+  };
+  window.addEventListener('focus', () => { syncEngine.pullNow(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncEngine.pullNow(); });
+  syncEngine.start();
+}
 // Every target copies first (the clipboard is the transport), then opens the agent's scheme;
 // Hermes instead runs the prompt through the local CLI via pv.hermesRun().
 const sendMenu = $('sendMenu');
