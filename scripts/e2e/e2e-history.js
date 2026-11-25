@@ -122,7 +122,7 @@ app.whenReady().then(async () => {
   check('menu has .visible', menuState.visible === true, JSON.stringify(menuState));
   check('menu opacity is 1', menuState.opacity === '1', JSON.stringify(menuState));
   check('menu accepts pointer events', menuState.pointerEvents === 'auto', JSON.stringify(menuState));
-  check('only run-scoped items shown', JSON.stringify(menuState.visibleItems) === JSON.stringify(['rename','move','delete']), JSON.stringify(menuState.visibleItems));
+  check('only run-scoped items shown', JSON.stringify(menuState.visibleItems) === JSON.stringify(['rename','move','rerun','compare','delete']), JSON.stringify(menuState.visibleItems));
 
   console.log('\n--- 3. rename via the real modal ---');
   await rightClickRun(ALPHA);
@@ -191,7 +191,7 @@ app.whenReady().then(async () => {
   await new Promise((r) => setTimeout(r, 700));
   const betaMeta = JSON.parse(fs.readFileSync(path.join(RUNS, '20260101-000000-002.meta.json'), 'utf8'));
   check('folder renamed in meta.json', betaMeta.project === 'Home projects', JSON.stringify(betaMeta));
-  const newHeading = await js(`[...document.querySelectorAll('#history .history-project')].map(g=>g.textContent.trim())`);
+  const newHeading = await js(`[...document.querySelectorAll('#history .history-project')].map(g=>(g.querySelector('.hp-label')||g).textContent.trim())`);
   check('sidebar shows the new folder name', newHeading.includes('Home projects'), JSON.stringify(newHeading));
 
   console.log('\n--- 8. delete a folder keeps its volleys ---');
