@@ -753,7 +753,10 @@ ipcMain.handle('scaffold:write', async (_e, cfg) => {
       const target = path.join(dir, ...file.path.split('/'));
       // Belt and braces: the resolved target must stay inside the chosen directory even
       // for symlinks smuggled into a subpath that parseManifest's ".." check cannot see.
-      if (!path.resolve(target).startsWith(dir + path.sep) && path.resolve(target) !== dir) {
+      // Windows compares paths case-insensitively, so the containment check must too.
+      const resolved = path.resolve(target);
+      const inside = resolved === dir || resolved.toLowerCase().startsWith(dir.toLowerCase() + path.sep);
+      if (!inside) {
         return { ok: false, message: `Refusing to write outside the folder: ${file.path}` };
       }
       fs.mkdirSync(path.dirname(target), { recursive: true });

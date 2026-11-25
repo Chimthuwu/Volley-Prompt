@@ -1182,7 +1182,6 @@ function currentScaffoldCfg() {
   };
 }
 function ensureHandoffFiles(manifest, prompt, idea, cycles) {
-  const cfg = currentScaffoldCfg();
   const keep = manifest.filter((f) => f.path !== 'PROMPT.md' && f.path !== 'todo.md');
   keep.push({ path: 'PROMPT.md', content: prompt });
   keep.push({ path: 'todo.md', content: VPS().buildTodoMd({ idea, prompt, cycles, manifest }) });

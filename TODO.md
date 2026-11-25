@@ -146,6 +146,23 @@ Everything stays on the account the site is already deployed to. One `wrangler`,
 
 ## Inbox (agent-proposed)
 
+- [ ] **Zip-mode UI test for the web scaffold fallback** [P2] [tests] [size:S]
+  Why: lib/zip.js is unit-tested (incl. external extraction) and the desktop write path has jsdom coverage, but the "picker unsupported → confirm becomes Download .zip → pv.scaffoldExportZip" flow in tests/scaffold-ui.test.js is not exercised.
+  Done when: a jsdom test boots with pv.scaffoldPickDir resolving `{ ok:false, unsupported:true }`, asserts the confirm label flips to the zip affordance and pv.scaffoldExportZip is called with the manifest.
+  Hints: the renderer reads `r.unsupported` from scaffoldPickDir's response; no other wiring.
+- [ ] **Case-insensitive containment check in scaffold:write** [P3] [code audit] [size:S]
+  Why: `path.resolve(target).startsWith(dir + path.sep)` in main.js is case-sensitive, but Windows paths are not — a same-dir-different-case edge could slip past the containment check.
+  Done when: both sides are lowercased (or compared via a shared casefold helper) before the startsWith check, with a node test covering `C:/Tmp` vs `c:/tmp`.
+  Hints: keep the fix in main.js only — the browser path uses getDirectoryHandle which cannot escape.
+- [ ] **Live scaffold progress between calls** [P3] [UI polish] [size:M]
+  Why: runScaffold() only updates `#utilityTitle` after each call resolves; long Writer calls look frozen for up to a minute.
+  Done when: scaffold:call (desktop) and site/pv.js scaffoldCall accept an onDelta hook and the title shows a "…writing" pulse or byte counter while streaming.
+  Hints: provider.chat and the web stream() already take onDelta; only the plumbing is missing.
+- [ ] **Sync status feedback in Settings > Sync between devices** [P3] [UI polish] [size:S]
+  Why: after the A4 wiring, pull/push happen silently; users cannot tell whether sync worked (engine logs go to console.info only).
+  Done when: the last engine log line (e.g. "pushed · adopted settings") is surfaced into `#pairStatus` or a small `#syncStatus` element, debounced so it doesn't flicker.
+  Hints: pass `log` into the renderer's engine creation; write to the DOM there.
+
 - [ ] **README: document test + rebuild workflow** [P2] [docs] [size:S]
   Why: "Run npm run dist after every source change or the shortcut goes stale (bit twice)" lives only in this todo; README doesn't mention `npm test` / `npm run test:e2e` at all.
   Done when: README has a short "Developing" section: test, e2e, dist, site:deploy, and the Windows icon-cache caveat after rebuilds.

@@ -27,7 +27,10 @@ async function boot({ criticReply = CRITIC_APPROVE, authorReply = AUTHOR_REPLY, 
   const calls = [];
   const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/', pretendToBeVisual: true });
   const w = dom.window;
-  const pv = new Proxy({}, { get: (_t, name) => (...a) => {
+  const pv = new Proxy({}, { get: (t, name) => {
+    // Test-visible overrides win first (a plain `w.pv.x = fn` must take effect).
+    if (Object.prototype.hasOwnProperty.call(t, name)) return t[name];
+    return (...a) => {
     calls.push([name, ...a]);
     switch (name) {
       case 'hasKey': return Promise.resolve(true);
@@ -45,6 +48,7 @@ async function boot({ criticReply = CRITIC_APPROVE, authorReply = AUTHOR_REPLY, 
       case 'scaffoldWrite': return Promise.resolve(writeResult);
       default: return Promise.resolve({ ok: true });
     }
+    };
   } });
   w.pv = pv; w.scrollTo = () => {}; w.requestAnimationFrame = () => 0;
   w.HTMLCanvasElement.prototype.getContext = () => new Proxy({}, { get: () => () => ({ addColorStop() {} }), set: () => true });
@@ -133,4 +137,27 @@ test('a non-empty destination needs the explicit merge confirmation before overw
   // The merge confirm modal is shown (askConfirm uses #promptModal).
   assert.equal(doc.getElementById('promptModal').classList.contains('hidden'), false, 'merge prompt is up');
   assert.match(doc.getElementById('promptMessage').textContent, /already has files/);
+});
+
+test('no folder picker → confirm becomes the .zip download and exports the manifest', async () => {
+  const { w, calls } = await boot({
+    // Override the pick response: jsdom has no showDirectoryPicker, so the app should
+    // flip into zip mode rather than leave the user stuck.
+  });
+  w.pv.scaffoldPickDir = () => Promise.resolve({ ok: false, unsupported: true, message: 'This browser cannot write folders.' });
+  const doc = w.document;
+  doc.getElementById('final').value = PROMPT;
+  doc.getElementById('rounds').value = '1';
+  doc.getElementById('btnScaffold').click();
+  await new Promise((r) => setTimeout(r, 50));
+  doc.getElementById('scaffoldPick').click();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(doc.getElementById('scaffoldConfirm').disabled, false, 'zip mode unlocks confirm without a folder');
+  assert.match(doc.getElementById('scaffoldConfirm').textContent, /\.zip/);
+  doc.getElementById('scaffoldConfirm').click();
+  await new Promise((r) => setTimeout(r, 20));
+  const exports = calls.filter(([n]) => n === 'scaffoldExportZip');
+  assert.equal(exports.length, 1);
+  assert.ok(exports[0][1].manifest.some((f) => f.path === 'todo.md'), 'the handoff rides in the zip');
+  assert.ok(!calls.some(([n]) => n === 'scaffoldWrite'), 'zip mode never touches the folder-write contract');
 });
