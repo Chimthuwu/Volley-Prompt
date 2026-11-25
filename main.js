@@ -549,7 +549,7 @@ ipcMain.handle('utility:call', async (_e, cfg) => {
   if (!model) throw new Error('Choose a model first.');
   // Optional steer for a variant: e.g. "make it mobile-first, drop the audio". Capped so a
   // pasted essay can't blow up the request.
-  const instruction = String(cfg.instruction || '').slice(0, 10000).trim();
+  const instruction = String(cfg.instruction || '').slice(0, 100000).trim();
   const userContent = cfg.kind === 'variant' && instruction
     ? `${cfg.prompt}\n\nVARIANT INSTRUCTION FROM THE USER (apply it, keep the rest of the prompt coherent and complete):\n${instruction}`
     : cfg.prompt;

@@ -770,7 +770,7 @@ async function runUtility(kind, instruction = '') {
   if (!model.isFree && !confirm(`This ${kind} helper will make an extra API call using ${model.id} (about $${(model.perM / 1e6 * $('final').value.length / 4).toFixed(3)}+ estimated). Continue?`)) return;
   show('utilityOutput'); $('utilityTitle').textContent = `${kind} · ${model.isFree ? 'FREE model' : model.id} · working…`; $('utilityText').textContent = '';
   try {
-    const result = await pv.utility({ kind, model: model.id, prompt: $('final').value, instruction: String(instruction || '').slice(0, 800) });
+    const result = await pv.utility({ kind, model: model.id, prompt: $('final').value, instruction: String(instruction || '').slice(0, 100000) });
     $('utilityTitle').textContent = `${kind} · ${result.usage ? `${result.usage.total_tokens || '?'} tokens` : 'usage unavailable'} · ${(result.elapsedMs / 1000).toFixed(1)}s`;
     $('utilityText').textContent = result.text || '(empty response)';
   } catch (e) { $('utilityTitle').textContent = `${kind} failed`; $('utilityText').textContent = e.message || String(e); }
@@ -1626,7 +1626,24 @@ async function loadHistory() {
     const heading = document.createElement('div');
     heading.className = 'history-project';
     heading.dataset.projectKey = key;
-    heading.textContent = key || 'Other volleys';
+    heading.dataset.projectLabel = key || 'Other volleys';
+    const hpLabel = document.createElement('span');
+    hpLabel.className = 'hp-label';
+    hpLabel.textContent = key || 'Other volleys';
+    heading.appendChild(hpLabel);
+    // Visible folder management (was right-click only): rename / delete the group.
+    const hpActions = document.createElement('span');
+    hpActions.className = 'hist-actions';
+    const hpAct = (icon, tip, action, danger) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.title = tip; b.setAttribute('aria-label', tip); b.textContent = icon;
+      if (danger) b.className = 'danger';
+      b.addEventListener('click', (e) => { e.stopPropagation(); runHistoryAction(action, { kind: 'project', key, label: key || 'Other volleys' }); });
+      return b;
+    };
+    hpActions.append(hpAct('✎', 'Rename folder', 'rename-project'));
+    if (key) hpActions.append(hpAct('🗑', 'Delete folder (volleys are kept)', 'delete-project', true));
+    heading.appendChild(hpActions);
     heading.draggable = true;
     heading.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/plain', 'folder:' + key);
@@ -1641,12 +1658,28 @@ async function loadHistory() {
       el.className = 'hist-item';
       el.dataset.path = r.path;
       el.dataset.id = r.name; // For context menu / drag-drop referencing
-      el.title = stamp; // r.title is user-controlled (the idea's first line) — never into innerHTML/attributes unescaped
-      el.textContent = (r.incomplete ? '✂ ' : '') + (r.title || stamp);
+      el.title = `${stamp}\n✎ rename · 📁 move · 🗑 delete (also on right-click)`; // r.title is user-controlled — never into innerHTML/attributes unescaped
+      const title = document.createElement('span');
+      title.className = 'hist-title';
+      title.textContent = (r.incomplete ? '✂ ' : '') + (r.title || stamp)
+        + (r.meta?.outcome ? ` · ${({ used: '✓', edited: '✎', failed: '!', unused: '–' })[r.meta.outcome] || ''}` : '')
+        + (r.meta?.score != null ? ` · ${r.meta.score}` : '');
+      // Visible management buttons (the desktop build has them): rename / move / delete.
+      // They used to hide behind a right-click nobody could discover.
+      const actions = document.createElement('span');
+      actions.className = 'hist-actions';
+      const act = (icon, tip, action, danger) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.title = tip; b.setAttribute('aria-label', tip); b.textContent = icon;
+        if (danger) b.className = 'danger';
+        b.addEventListener('click', (e) => { e.stopPropagation(); runHistoryAction(action, { kind: 'run', name: r.name, title: r.title || stamp, key: (r.meta && r.meta.project) || '' }); });
+        return b;
+      };
+      actions.append(act('✎', 'Rename', 'rename'), act('📁', 'Move to folder', 'move'), act('🗑', 'Delete', 'delete', true));
+      el.append(title, actions);
       el.draggable = true;
-      // Saved runs are on disk; clicking loads the final prompt (and the original idea) via pv.openRun.
+      // Saved runs live in browser storage; clicking loads the final prompt (and the original idea).
       el.addEventListener('click', () => openHistoryItem(r.name));
-      if (r.meta?.outcome) el.textContent += ` · ${({ used: '✓', edited: '✎', failed: '!', unused: '–' })[r.meta.outcome] || ''}`;
       history.appendChild(el);
     }
   }
@@ -1868,7 +1901,7 @@ if (historyEl) {
     if (group) {
       e.preventDefault();
       const key = group.dataset.projectKey || '';
-      openContextMenu(e, { kind: 'project', key, label: group.textContent.trim() });
+      openContextMenu(e, { kind: 'project', key, label: group.dataset.projectLabel || key || 'Other volleys' });
     }
   });
 

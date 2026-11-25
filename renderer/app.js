@@ -943,7 +943,7 @@ async function runUtility(kind, instruction = '') {
   if (!model.isFree && !(await askConfirm({ title: `Run ${kind} helper?`, message: `This will make an extra API call using ${model.id}${provider === 'openrouter' ? ' (billed by OpenRouter)' : ` via ${provider}`}.`, okLabel: 'Continue' }))) return;
   show('utilityOutput'); $('utilityTitle').textContent = `${kind} · ${model.isFree ? 'FREE model' : model.id} · working…`; $('utilityText').textContent = '';
   try {
-    const result = await pv.utility({ kind, model: model.id, prompt: $('final').value, instruction: String(instruction || '').slice(0, 10000), provider });
+    const result = await pv.utility({ kind, model: model.id, prompt: $('final').value, instruction: String(instruction || '').slice(0, 100000), provider });
     $('utilityTitle').textContent = `${kind} · ${result.usage ? `${result.usage.total_tokens || '?'} tokens` : 'usage unavailable'} · ${(result.elapsedMs / 1000).toFixed(1)}s`;
     $('utilityText').textContent = result.text || '(empty response)';
   } catch (e) { $('utilityTitle').textContent = `${kind} failed`; $('utilityText').textContent = e.message || String(e); }
@@ -1851,7 +1851,24 @@ async function loadHistory() {
     const heading = document.createElement('div');
     heading.className = 'history-project';
     heading.dataset.projectKey = key;
-    heading.textContent = key || 'Other volleys';
+    heading.dataset.projectLabel = key || 'Other volleys';
+    const hpLabel = document.createElement('span');
+    hpLabel.className = 'hp-label';
+    hpLabel.textContent = key || 'Other volleys';
+    heading.appendChild(hpLabel);
+    // Visible folder management (was right-click only): rename / delete the group.
+    const hpActions = document.createElement('span');
+    hpActions.className = 'hist-actions';
+    const hpAct = (icon, tip, action, danger) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.title = tip; b.setAttribute('aria-label', tip); b.textContent = icon;
+      if (danger) b.className = 'danger';
+      b.addEventListener('click', (e) => { e.stopPropagation(); runHistoryAction(action, { kind: 'project', key, label: key || 'Other volleys' }); });
+      return b;
+    };
+    hpActions.append(hpAct('✎', 'Rename folder', 'rename-project'));
+    if (key) hpActions.append(hpAct('🗑', 'Delete folder (volleys are kept)', 'delete-project', true));
+    heading.appendChild(hpActions);
     heading.draggable = true;
     heading.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/plain', 'folder:' + key);
@@ -2135,7 +2152,7 @@ if (historyEl) {
     if (group) {
       e.preventDefault();
       const key = group.dataset.projectKey || '';
-      openContextMenu(e, { kind: 'project', key, label: group.textContent.trim() });
+      openContextMenu(e, { kind: 'project', key, label: group.dataset.projectLabel || key || 'Other volleys' });
     }
   });
 

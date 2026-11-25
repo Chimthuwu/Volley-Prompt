@@ -1058,6 +1058,11 @@ label .prov-select { margin-top: 6px; }
 /* ---- history: search, hover actions, keyboard focus ---- */
 .history-search { width:100%; margin:0 0 8px; padding:7px 10px; font-size:12px; border:1px solid var(--line); border-radius:8px; background:var(--field); color:var(--txt); }
 .history-search:focus { outline:none; border-color:var(--neon-cyan); }
+/* Folder heading: label + hover-revealed management buttons */
+.history-project { display:flex; align-items:center; gap:6px; }
+.history-project .hp-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.history-project .hist-actions { display:none; gap:2px; flex-shrink:0; }
+.history-project:hover .hist-actions { display:flex; }
 .hist-item { display:flex; align-items:center; gap:6px; }
 .hist-item .hist-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .hist-item .hist-actions { display:none; gap:2px; flex-shrink:0; }
