@@ -672,7 +672,7 @@ ipcMain.handle('run:start', async (_e, cfg) => {
     const provider = providerModule.getProvider(provId);
     try {
       const callRes = await provider.chat({ model, system, messages, signal: ctl.signal, onDelta, onUsage: (u) => recordMetric(model, u), onCtl: (abort) => { if (current) current.callAbort = abort; } });
-      return callRes.text;
+      return typeof callRes === 'string' ? callRes : callRes.text;
     } catch (e) {
       if (ctl.signal.aborted) throw e;
       // "Retry round with these models": the in-flight request was aborted on purpose, and the
@@ -689,7 +689,7 @@ ipcMain.handle('run:start', async (_e, cfg) => {
       send({ type: 'panel', role: panel, r }); // clear the partial panel for the retry
       const fallbackProv = providerModule.getProvider(providersByRole.fallback);
       const callRes = await fallbackProv.chat({ model: fallbackModel, system, messages, signal: ctl.signal, onDelta, onUsage: (u) => recordMetric(fallbackModel, u), onCtl: (abort) => { if (current) current.callAbort = abort; } });
-      return callRes.text;
+      return typeof callRes === 'string' ? callRes : callRes.text;
     }
   };
   const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);

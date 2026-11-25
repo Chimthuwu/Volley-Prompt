@@ -76,3 +76,11 @@ test('listRuns is slim (no snapshots), cached, and sees changes made through the
   assert.strictEqual(runsStore.listRuns(dir).length, 0);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('OpenRouter chat resolves to { text } like every other provider (regression: Writer text was undefined)', async () => {
+  providerModule.init({ stream: async (_k, _m, _s, _msgs, _sig, onDelta) => { onDelta('draft'); return 'draft'; }, loadKey: () => 'k', getModelsCache: () => ({ data: [] }) });
+  let got = '';
+  const res = await providerModule.getProvider('openrouter').chat({ model: 'm', system: 's', messages: [], onDelta: (d) => { got += d; } });
+  assert.deepStrictEqual(res, { text: 'draft' });
+  assert.strictEqual(got, 'draft');
+});
