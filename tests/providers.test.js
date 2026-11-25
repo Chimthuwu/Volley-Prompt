@@ -42,7 +42,11 @@ providerModule.init(deps);
   assert.strictEqual((await goo.getModels())[0].billing, 'free-account', 'google models billed as free account / API');
 
   const oll = providerModule.getProvider('ollama');
-  assert.strictEqual((await oll.getStatus()).connected, false, 'ollama not connected without a server');
+  // Hermetic: a real Ollama running on this machine must not change the result.
+  const fetchBefore = global.fetch;
+  global.fetch = async () => { throw new TypeError('connection refused'); };
+  try { assert.strictEqual((await oll.getStatus()).connected, false, 'ollama not connected without a server'); }
+  finally { global.fetch = fetchBefore; }
   assert.ok(Array.isArray(await oll.getModels()), 'ollama models is an array');
 
   const parse = providerModule.parseCliLine;

@@ -2251,6 +2251,22 @@ frame();
 const panelOf = (role) => document.querySelector('.panel.' + role);
 const streaming = (role, on) => panelOf(role).classList.toggle('streaming', on);
 
+// "Is it frozen?" feedback: until the first words arrive, show how long we've been waiting and,
+// after 20s, say what is probably happening and what to do (free models queue for minutes).
+let waitTimer = null;
+function stopWaitTimer() { if (waitTimer) { clearInterval(waitTimer); waitTimer = null; } }
+function startWaitTimer(base, model) {
+  stopWaitTimer();
+  const t0 = Date.now();
+  const tick = () => {
+    const secs = Math.round((Date.now() - t0) / 1000);
+    if (secs < 3) return;
+    const free = /:free$/i.test(model || '');
+    $('statusText').textContent = `${base} waiting for the first words · ${secs}s`
+      + (secs >= 20 ? (free ? ' · free models queue behind other users — use ↻ Retry round with a paid model if this drags' : ' · the model is slow to start — use ↻ Retry round to switch models') : '');
+  };
+  waitTimer = setInterval(tick, 1000);
+}
 pv.onEvent(async (ev) => {
   switch (ev.type) {
     case 'round':
@@ -2264,13 +2280,16 @@ pv.onEvent(async (ev) => {
       (isA ? $('aRound') : $('cRound')).textContent = `· round ${ev.r}`;
       streaming('author', isA); streaming('critic', !isA);
       $('statusText').textContent = isA ? `✍ Writer is drafting (round ${ev.r})…` : `🔍 Reviewer is reading (round ${ev.r})…`;
+      startWaitTimer($('statusText').textContent, isA ? $('runAuthor').value : $('runCritic').value);
       break;
     }
     case 'delta': {
+      stopWaitTimer();
       const o = ev.role === 'author' ? $('aOut') : $('cOut');
       o.textContent += ev.text; o.scrollTop = o.scrollHeight; break;
     }
     case 'verdict':
+      stopWaitTimer();
       streaming('critic', false);
       $('statusText').textContent = ev.verdict === 'APPROVE' ? '✅ Reviewer approved!' : '↻ Reviewer wants changes';
       break;
@@ -2310,6 +2329,7 @@ pv.onEvent(async (ev) => {
     case 'await-notes': show('notesBox'); $('notes').focus(); $('notesBox').scrollIntoView({ behavior: 'smooth' }); break;
     case 'notice': toast('ℹ ' + ev.message, 8000); break;
     case 'done':
+      stopWaitTimer();
       streaming('author', false); streaming('critic', false); show('notesBox', false); show('reviewIssues', false);
       await loadHistory();
       const finishedItem = historyItems.find((x) => x.name === ev.historyName) || historyItems[0];
@@ -2330,6 +2350,7 @@ pv.onEvent(async (ev) => {
       updateResultButtons();
       break;
     case 'error':
+      stopWaitTimer();
       streaming('author', false); streaming('critic', false); show('notesBox', false);
       if (runAbandoned) break;
       show('run', false);
