@@ -128,6 +128,37 @@ Everything stays on the account the site is already deployed to. One `wrangler`,
 - Done earlier: editable final prompt, per-panel copy, round progress bar, Ctrl+Enter, re-run with tweaked idea, single-instance lock, auto-retry on 429/5xx/network.
 
 **Overnight / `/sesh` ideas (from old inbox, still valid):** headless mode (`--headless`, log to `nitesesh/`); pre-build `dist/` before overnight runs; `.env` dark theme for overnight.
-- [BUG] **`main.js` must add a hard ~30 s timeout** so a missing/stalled OpenRouter response can't hang it — this exact stall is what makes a volley hang (and why the Hermes plugin caps every HTTP call with a per-call timeout).
+- [x] BUG (fixed): **`main.js` has the hard idle-stall timeout** — `IDLE_MS = 30000` aborts a stream that sends no bytes for 30 s (120 s for vision calls) and retries per the 429/5xx policy, so a missing/stalled OpenRouter response can no longer hang a volley. Verified in code 2026-11-26.
 
 **Note:** a Hermes **`/volley`** Discord plugin now exists (`~/.hermes/plugins/volley-prompt`) — it reuses this app's exact Writer/Reviewer systems, presets, folder/GitHub filters and OpenRouter key, so "Send to Hermes" (B1) has a target today.
+
+---
+
+## Decisions made (review me)
+
+- 2026-11-26 — DO_FIRST_NOW.md user bugs worked before workstream A/B; B1 "Send to ▸" done before A1 unification. Why: the bugs and B1 are small, testable wins (both e2e suites cover them); A1 is a large refactor with public-site regression risk, better started fresh with the full run ahead of it. B1 was marked "do first — hours, immediate payoff" in the todo itself.
+- 2026-11-26 — "Send to ▸ Hermes" shipped as the CLI spawn path (`hermes chat -q <prompt>`), not the `/v1/runs` API. Why: the API needs a token + api_server enablement the app can't assume; the CLI path needs nothing. Checkpoint: none needed (no open design question) — see commit 828b5e5. Refinement (store the gateway token, poll /v1/runs in the result panel) belongs with A2/A3.
+- 2026-11-26 — "Cline" opens vscode:// (no cline:// scheme verified): prompt goes to the clipboard and the label says "paste it into the Cline extension". If Cline ships a real deep link, swap it in SEND_TARGETS.
+
+## Inbox (agent-proposed)
+
+- [ ] **README: document test + rebuild workflow** [P2] [docs] [size:S]
+  Why: "Run npm run dist after every source change or the shortcut goes stale (bit twice)" lives only in this todo; README doesn't mention `npm test` / `npm run test:e2e` at all.
+  Done when: README has a short "Developing" section: test, e2e, dist, site:deploy, and the Windows icon-cache caveat after rebuilds.
+  Hints: note that the desktop shortcut targets dist/win-unpacked/VolleyPrompt.exe.
+- [ ] **Keyboard access for context + send menus** [P2] [accessibility] [size:S]
+  Why: #contextMenu and #sendMenu items are divs; keyboard users can't open or navigate them (the sidebar itself has F2/Del/Enter, so the gap is the two menus).
+  Done when: items are focusable (button/role=menuitem) and Enter/Escape open/close both menus.
+  Hints: .menu-item styles apply unchanged to <button>; keep the delegated click handlers.
+- [ ] **Debounce sidebar search re-render** [P3] [performance] [size:S]
+  Why: loadHistory() rebuilds the whole #history DOM on every keystroke of #historySearch (renderer/app.js historySearch input handler).
+  Done when: input is debounced ~150 ms (or filtering mutates in place) with no behavior change; e2e still green.
+  Hints: list caching already exists in lib/runs-store.js; this is purely renderer-side.
+- [ ] **Smoke-test the web run flow after A1 unification** [P1] [tests] [size:M]
+  Why: e2e-history-web covers rename/move/delete only; the OpenRouter streaming run path on the site has no automated coverage, and A1 will swap site/app.js for the renderer file.
+  Done when: a scripted check runs a volley against a mock/echo server (or records a fixture) asserting round-snapshot events render; wire into test:e2e:web.
+  Hints: site/pv.js stream() is the seam to stub; DO NOT hit real OpenRouter from tests.
+- [ ] **Variant/utility caps: single shared constant** [P3] [code audit] [size:S]
+  Why: the 100000 instruction cap now exists in four places (2x index.html maxlength, renderer/app.js, main.js, site/app.js, site/pv.js utility validator) — they drifted once already (10000 vs 800).
+  Done when: one constant exported from lib/ (or validated once in main.js/pv.js) and the HTML maxlengths reference the same number via a build/test assertion.
+  Hints: an ipc-contract style test comparing the caps across files would prevent drift without a build step.
