@@ -43,7 +43,9 @@ function createWindow() {
   });
   win.setMenuBarVisibility(false);
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+  // Only ever hand https links to the OS; anything else (file:, custom protocols) is dropped.
+  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file:')) { e.preventDefault(); if (/^https:\/\//i.test(url)) shell.openExternal(url); } });
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -279,10 +281,12 @@ ipcMain.handle('key:test', async (_e, k) => {
 ipcMain.handle('key:usage', async () => {
   const key = loadKey();
   if (!key) return { ok: false, message: 'No saved key.' };
-  const r = await fetch(`${API}/key`, { headers: { Authorization: `Bearer ${key}` } });
-  if (!r.ok) return { ok: false, message: friendly(r.status) };
-  const data = await r.json();
-  return { ok: true, data: data.data || data };
+  try {
+    const r = await fetch(`${API}/key`, { headers: { Authorization: `Bearer ${key}` } });
+    if (!r.ok) return { ok: false, message: friendly(r.status) };
+    const data = await r.json();
+    return { ok: true, data: data.data || data };
+  } catch { return { ok: false, message: "Can't reach OpenRouter. Check your internet." }; }
 });
 const CHEAP_PER_M_TOKENS = 2; // $2 per million tokens (prompt+completion combined) or cheaper
 
@@ -545,7 +549,7 @@ ipcMain.handle('utility:call', async (_e, cfg) => {
   if (!model) throw new Error('Choose a model first.');
   // Optional steer for a variant: e.g. "make it mobile-first, drop the audio". Capped so a
   // pasted essay can't blow up the request.
-  const instruction = String(cfg.instruction || '').slice(0, 800).trim();
+  const instruction = String(cfg.instruction || '').slice(0, 10000).trim();
   const userContent = cfg.kind === 'variant' && instruction
     ? `${cfg.prompt}\n\nVARIANT INSTRUCTION FROM THE USER (apply it, keep the rest of the prompt coherent and complete):\n${instruction}`
     : cfg.prompt;
@@ -719,12 +723,14 @@ ipcMain.handle('run:start', async (_e, cfg) => {
   // The Writer (which can see the attachments) describes them once, up front, when the
   // Reviewer is text-only — one extra call per run, cheaper than requiring a vision Reviewer.
   let imageDescription = '';
-  if (reviewImageMode === 'describe') {
+  // Runs inside the try below: if this call fails, `current` must still be released, otherwise
+  // the app believes a volley is in progress forever and refuses to start another.
+  const describeImages = async () => {
     imageDescription = await callModel('Writer', 0, IMAGE_DESCRIPTION_SYSTEM,
       [{ role: 'user', content: buildUserContent('Describe the attached images for a text-only reviewer. For each, state what it shows and which product feature or UX moment it demonstrates. Output ONLY the descriptions.', images, [], []) }],
       () => {});
     recvChars += imageDescription.length;
-  }
+  };
 
   let draft = '', finalSaved = false;
   const persistRunMeta = (extra = {}) => {
@@ -737,6 +743,7 @@ ipcMain.handle('run:start', async (_e, cfg) => {
     catch { return false; }
   };
   try {
+    if (reviewImageMode === 'describe') await describeImages();
     for (let r = 1; r <= rounds; r++) {
       send({ type: 'round', r, rounds, models: { ...runModels } });
       send({ type: 'panel', role: 'author', r });
@@ -757,7 +764,6 @@ ipcMain.handle('run:start', async (_e, cfg) => {
       if (r > 1 && oldDraft.trim()) send({ type: 'diff', oldText: oldDraft, newText: draft });
 
       send({ type: 'panel', role: 'critic', r });
-      send({ type: 'metric', promptTokens: 0, completionTokens: 0, totalCost: 0, elapsedMs: 0 });  // Track reviewer start
       const criticText = reviewImageMode === 'describe'
         ? `Original idea:\n${idea}\n\nImage descriptions (written by the Writer, which can view the attachments):\n${imageDescription}\n\nPrompt to review:\n\n${draft}`
         : `Original idea:\n${idea}\n\nPrompt to review:\n\n${draft}`;
@@ -806,7 +812,7 @@ ipcMain.handle('run:start', async (_e, cfg) => {
     if (ctl.signal.aborted) {
       draftSaved = draft.trim() ? saveAbortDraft() : false;
       persistRunMeta({ incomplete: true });
-      send({ type: 'done', final: draft, file: '', historyName: draftSaved ? `${stamp}-draft.md` : '', stopped: true, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
+      send({ type: 'done', models: { ...runModels }, final: draft, file: '', historyName: draftSaved ? `${stamp}-draft.md` : '', stopped: true, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
     } else {
       const finalPath = path.join(runsDir(), `${stamp}-final.md`);
       fs.writeFileSync(finalPath, draft);
@@ -814,12 +820,12 @@ ipcMain.handle('run:start', async (_e, cfg) => {
       finalSaved = true;
       log.push('## Final prompt\n', draft);
       fs.writeFileSync(logPath, log.join('\n'));
-      send({ type: 'done', final: draft, file: finalPath, historyName: `${stamp}-final.md`, idea, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
+      send({ type: 'done', models: { ...runModels }, final: draft, file: finalPath, historyName: `${stamp}-final.md`, idea, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
     }
   } catch (e) {
     if (ctl.signal.aborted) {
       draftSaved = draftSaved || (draft.trim() ? saveAbortDraft() : false);
-      send({ type: 'done', final: draft, file: '', historyName: draftSaved ? `${stamp}-draft.md` : '', stopped: true, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
+      send({ type: 'done', models: { ...runModels }, final: draft, file: '', historyName: draftSaved ? `${stamp}-draft.md` : '', stopped: true, snapshots, score: snapshots.at(-1)?.score ?? null, cost: actualCost, tokens: usagePrompt + usageCompletion, metrics });
     }
     else send({ type: 'error', message: e.message || String(e), partial: draft, idea });
   } finally {

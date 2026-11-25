@@ -500,13 +500,14 @@ async function collectRecentContext(n) {
   const chunks = [];
   for (const it of items) {
     if (chunks.length >= n) break;
-    let final = it.final;
+    if (it.incomplete) continue; // stopped drafts are not "finished prompts"
+    let final = it.final, idea = it.idea;
     if (final == null && typeof pv.openRun === 'function') {
       const got = await pv.openRun(it.name).catch(() => null);
-      final = got && got.final;
+      final = got && got.final; idea = idea || (got && got.idea);
     }
     if (!final) continue;
-    chunks.push(`— Past idea: ${it.idea || it.title || '(untitled)'}\n— Past finished prompt:\n${final}`);
+    chunks.push(`— Past idea: ${idea || it.title || '(untitled)'}\n— Past finished prompt:\n${final}`);
   }
   return chunks.join('\n\n');
 }
@@ -745,7 +746,7 @@ $('btnDelPreset').onclick = () => {
 refreshPresetSelect();
 
 // 2. Render a revision round as a line diff instead of a silent full rewrite.
-function escapeHtml(s) { return s.replace(/[&<>"]'/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function diffOps(A, B) {
   if (A.length * B.length > 160000) return null; // absurdly long prompt — plain text wins
   const n = A.length, m = B.length;
@@ -920,12 +921,15 @@ $('versionSlider').oninput = () => {
   $('versionLabel').textContent = `Round ${snap.round}`;
 };
 async function runUtility(kind, instruction = '') {
-  const model = MODEL_ROWS.find((r) => r.id === (lastRunMeta?.author || $('author').value)) || MODEL_ROWS.find((r) => r.isFree) || MODEL_ROWS[0];
-  if (!model) { toast('Load the model list first.', 5000); return; }
-  if (!model.isFree && !confirm(`This ${kind} helper will make an extra API call using ${model.id} (estimated from catalog pricing). Continue?`)) return;
+  const provider = $('authorProvider')?.value || 'openrouter';
+  const modelId = (lastRunMeta?.author || $('author').value || '').trim();
+  if (!modelId) { toast('Pick a Writer model first.', 5000); return; }
+  const row = provider === 'openrouter' ? MODEL_ROWS.find((r) => r.id === modelId) : null;
+  const model = { id: modelId, isFree: !!(row && row.isFree) || provider === 'ollama' };
+  if (!model.isFree && !(await askConfirm({ title: `Run ${kind} helper?`, message: `This will make an extra API call using ${model.id}${provider === 'openrouter' ? ' (billed by OpenRouter)' : ` via ${provider}`}.`, okLabel: 'Continue' }))) return;
   show('utilityOutput'); $('utilityTitle').textContent = `${kind} · ${model.isFree ? 'FREE model' : model.id} · working…`; $('utilityText').textContent = '';
   try {
-    const result = await pv.utility({ kind, model: model.id, prompt: $('final').value, instruction: String(instruction || '').slice(0, 800), provider: $('authorProvider')?.value || 'openrouter' });
+    const result = await pv.utility({ kind, model: model.id, prompt: $('final').value, instruction: String(instruction || '').slice(0, 10000), provider });
     $('utilityTitle').textContent = `${kind} · ${result.usage ? `${result.usage.total_tokens || '?'} tokens` : 'usage unavailable'} · ${(result.elapsedMs / 1000).toFixed(1)}s`;
     $('utilityText').textContent = result.text || '(empty response)';
   } catch (e) { $('utilityTitle').textContent = `${kind} failed`; $('utilityText').textContent = e.message || String(e); }
@@ -969,7 +973,7 @@ $('btnReplay').onclick = () => {
   replayIdx = runSnapshots.length - 1;
   $('replaySlider').max = String(runSnapshots.length);
   const when = lastRunMeta?.when ? ` · ${lastRunMeta.when}` : '';
-  $('replayMeta').textContent = `${escapeHtml(lastRunMeta?.project || 'Untitled')} · ${runSnapshots.length} round${runSnapshots.length === 1 ? '' : 's'}${when} — step through each Draft ↔ Review exchange.`;
+  $('replayMeta').textContent = `${lastRunMeta?.project || 'Untitled'} · ${runSnapshots.length} round${runSnapshots.length === 1 ? '' : 's'}${when} — step through each Draft ↔ Review exchange.`;
   show('replayModal');
   renderReplay();
 };
@@ -1032,7 +1036,7 @@ function addAttachmentFiles(fileList) {
   for (const file of Array.from(fileList)) {
     const ext = extOf(file.name);
     if (!ALLOWED_EXT.has(ext)) { rejected.push(`${file.name} (unsupported type)`); continue; }
-    if (file.size > MAX_FILE_BYTES) { rejected.push(`${file.name} (over 25 MB)`); continue; }
+    if (file.size > MAX_FILE_BYTES) { rejected.push(`${file.name} (over 64 MB)`); continue; }
     if (isDuplicateFile(file)) continue;
     if (pendingAttachments.length >= MAX_FILES) { rejected.push(`${file.name} (max ${MAX_FILES} attachments)`); continue; }
     let url = null;
@@ -1832,7 +1836,7 @@ async function loadHistory() {
     heading.addEventListener('dragend', () => heading.classList.remove('dragging'));
     history.appendChild(heading);
     for (const r of items) {
-      const stamp = r.name.replace('-final.md', '');
+      const stamp = r.name.replace(/-(final|draft)\.md$/, '');
       const el = document.createElement('div');
       el.className = 'hist-item';
       el.dataset.path = r.path;
@@ -1872,11 +1876,14 @@ async function openHistoryItem(name) {
   $('versionLabel').textContent = runSnapshots.length ? `Round ${runSnapshots.length}` : '—';
   $('fitnessScore').textContent = got.meta?.score != null ? `Fitness: ${got.meta.score}/100` : 'Fitness: —';
   $('outcomeTag').value = got.meta?.outcome || '';
+  const mp = got.meta?.modelPair;
+  $('modelInfo').textContent = mp ? `Models: Writer ${mp.author} · Reviewer ${mp.critic}${got.meta?.cost ? ` · $${Number(got.meta.cost).toFixed(4)}` : ''}` : 'Models: not recorded for this volley';
   // Opening a history item abandons any background run, same as New Volley.
   runAbandoned = true;
-  const stamp = String(name).replace(/-final\.md$/, '');
+  const stamp = String(name).replace(/-(final|draft)\.md$/, '');
+  // Run stamps are written in UTC (toISOString), so parse them as UTC to show the right local time.
   const d = /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$/.test(stamp)
-    ? new Date(stamp.replace(/^(\d{4}-\d{2}-\d{2})-(\d{2})-(\d{2})-(\d{2})$/, '$1T$2:$3:$4'))
+    ? new Date(stamp.replace(/^(\d{4}-\d{2}-\d{2})-(\d{2})-(\d{2})-(\d{2})$/, '$1T$2:$3:$4Z'))
     : null;
   show('result', false); show('run', false); show('result');
   $('final').value = got.final;
@@ -1910,10 +1917,11 @@ function openContextMenu(e, target) {
     if (show && el.dataset.action === 'delete-project' && !target.key) show = false;
     el.classList.toggle('hidden', !show);
   });
-  contextMenu.style.left = `${e.pageX}px`;
-  contextMenu.style.top = `${e.pageY}px`;
   contextMenu.classList.remove('hidden');
   contextMenu.classList.add('visible');
+  const mw = contextMenu.offsetWidth, mh = contextMenu.offsetHeight;
+  contextMenu.style.left = `${Math.max(4, Math.min(e.clientX, innerWidth - mw - 4))}px`;
+  contextMenu.style.top = `${Math.max(4, Math.min(e.clientY, innerHeight - mh - 4))}px`;
 }
 
 // Text prompt. `choices` are quick-pick buttons (used by "move to folder").
@@ -2107,9 +2115,7 @@ if (historyEl) {
       // Dropping one folder onto another merges its volleys into the target.
       const src = payload.slice(7);
       if (src === dest) return;
-      const list = await pv.projects();
-      const match = (list || []).find((p) => p.key === src);
-      const moved = await pv.renameProject(src, dest || 'Other volleys');
+      const moved = dest ? await pv.renameProject(src, dest) : await pv.deleteProject(src);
       toast(moved ? `Moved ${moved} volley${moved === 1 ? '' : 's'} into "${dest || 'Other volleys'}".` : 'Nothing to move.', 3500);
       await loadHistory();
       return;
@@ -2220,7 +2226,9 @@ pv.onEvent(async (ev) => {
       $('final').value = ev.final;
       runSnapshots = ev.snapshots || runSnapshots;
       if (ev.score != null) $('fitnessScore').textContent = `Fitness: ${ev.score}/100`;
-      const modelText = lastRunMeta ? `Model: ${lastRunMeta.author} · ${lastRunMeta.critic}` : '';
+      const fm = ev.models || (lastRunMeta ? { author: lastRunMeta.author, critic: lastRunMeta.critic } : null);
+      if (fm && lastRunMeta) { lastRunMeta.author = fm.author; lastRunMeta.critic = fm.critic; }
+      const modelText = fm ? `Models: Writer ${fm.author} · Reviewer ${fm.critic}${ev.cost ? ` · $${Number(ev.cost).toFixed(4)}` : ''}` : '';
       $('modelInfo').textContent = modelText;
       $('outcomeTag').value = '';
       showIdeaRecap(ev.idea, ev.file ? `Saved to ${ev.file}` : 'Stopped early — this is the latest draft.');
