@@ -41,19 +41,19 @@ Everything stays on the account the site is already deployed to. One `wrangler`,
 - [x] Add `functions/` to the Pages project so the API and the static site deploy together — `wrangler pages deploy site` picks up `functions/` automatically; `site:deploy` now also runs `build:web` first.
 
 ### A3. Identity — pairing secret (now) — **DECIDED: base64 code, not a word mnemonic**
-- [ ] `generatePairSecret()`: 128-bit random → **URL-safe base64** (e.g. 22 chars, no padding). Chosen over a 12-word mnemonic on 2026-11-01. Entropy is what matters — a short "hash" is guessable and would let anyone read the blob.
+- [x] `generatePairSecret()`: 128-bit random → **URL-safe base64** (22 chars, no padding) — implemented in `lib/pairing.js` with `blobIdFor()` (sha256 hex) and PBKDF2/AES-GCM profile crypto; 5 node tests cover shape, derivation, roundtrip, tamper rejection. Added 2026-11-26.
 - [ ] Because base64 is ugly to type, make it **copy/paste and QR-first**: desktop shows the code in a selectable field + a QR; web has one paste box. Never ask a human to type 22 random characters off a screen.
-- [ ] `derivedKey = PBKDF2/Argon2(secret)` client-side; `blobId = sha256(secret)`.
+- [x] `derivedKey = PBKDF2/Argon2(secret)` client-side; `blobId = sha256(secret)` — `deriveProfileKey()` / `blobIdFor()` in lib/pairing.js (pure WebCrypto, works in Electron, browsers and node).
 - [ ] Desktop "Pair" → shows the secret + QR. Web "Have a code?" → enter it. Both derive the same `blobId`, encrypt the same payload, read/write each other's state.
 - [ ] Persist secret locally on pair (desktop: keychain beside `key.bin`; web: `localStorage` — weaker than the keychain, but the **payload is E2E-encrypted**, so the threat is a leaked secret, not a server breach).
-- [ ] Server stores **opaque encrypted blobs** keyed by `blobId` + version + timestamp only.
+- [x] Server stores **opaque encrypted blobs** keyed by `blobId` + updatedAt only — functions/api/sync/[[path]].js (A2, tested).
 - [ ] Acceptance: pair desktop↔web with one code; change a preset on one, reload the other, it's there; unpair clears the local secret (orphaned server blob is fine).
 
 ### A4. Sync protocol
-- [ ] Payload = one JSON "profile": settings, presets, pairs, composer defaults, theme, **run history (metadata + prompts, never attachment contents — matches current privacy stance)**.
+- [x] Payload = one JSON "profile" with TOP-LEVEL SECTIONS (settings, presets, modelPairs, composer, theme, history) — `lib/sync-client.js` buildProfile/readProfile; history metadata + prompts, never attachment contents.
 - [ ] `pull()` on open/focus; `push()` debounced ~2 s after change.
-- [ ] **Conflict rule:** last-write-wins **per top-level section** (not whole-blob) so a settings tweak and a new run don't clobber each other; `updatedAt` per section. (CRDT is overkill for two devices.)
-- [ ] Size caps: KV value ≤ 1 MB → big run bodies in **R2**, pointers in KV; trim history to N most-recent.
+- [x] **Conflict rule:** last-write-wins **per top-level section** — `mergeProfile()` in lib/sync-client.js; a convergence test proves two devices merging in opposite orders reach identical state. (CRDT is overkill for two devices.)
+- [ ] Size caps: server enforces ≤ 1 MB (413) and `trimHistory()` keeps the newest N — **R2 for oversized run bodies still to do** (later; needs an R2 bucket, owner-gated like the KV id).
 - [ ] Rate-limit `/api/sync` per `blobId` (the only "auth").
 
 ### A5. Google login (later — same table)
