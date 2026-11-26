@@ -115,6 +115,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !themePa
   $('critic').value = store.get('critic', 'meta-llama/llama-3.3-70b-instruct');
   $('rounds').value = store.get('rounds', '3');
   $('outputMode').value = store.get('outputMode', 'prompt') === 'deep-plan' ? 'deep-plan' : 'prompt';
+  $('ambition').value = ['full', 'focused'].includes(store.get('ambition', 'balanced')) ? store.get('ambition', 'balanced') : 'balanced';
   $('idea').value = store.get('idea', '');
   $('auto').checked = store.get('auto', '0') === '1';
   const ap = store.get('authorProvider', 'openrouter');
@@ -564,6 +565,8 @@ async function composeCfgFromComposer() {
   cfg.fallbackProvider = store.get('fallbackProvider', '');
   cfg.outputMode = $('outputMode').value === 'deep-plan' ? 'deep-plan' : 'prompt';
   store.set('outputMode', cfg.outputMode);
+  cfg.ambition = ['full', 'focused'].includes($('ambition').value) ? $('ambition').value : 'balanced';
+  store.set('ambition', cfg.ambition);
   if (!cfg.author || !cfg.critic) { toast('Pick a model for both AIs.'); return null; }
   for (const k of ['author', 'critic', 'rounds', 'idea']) store.set(k, cfg[k]);
   store.set('auto', cfg.auto ? '1' : '0');
@@ -1014,7 +1017,7 @@ renderPairStatus();
 // syncing it is its own task). The transport (crypto + HTTP) differs per platform:
 // desktop = pv.syncPull/syncPush IPC into main.js, web = same-origin fetch in site/pv.js.
 const SYNC_JSON_SECTIONS = { settings: 'vpSettings', presets: 'vpPresets', modelPairs: 'vpModelPairs' };
-const SYNC_COMPOSER_KEYS = ['author', 'critic', 'rounds', 'outputMode', 'idea', 'auto', 'authorProvider', 'criticProvider'];
+const SYNC_COMPOSER_KEYS = ['author', 'critic', 'rounds', 'outputMode', 'ambition', 'idea', 'auto', 'authorProvider', 'criticProvider'];
 const SYNC_THEME_KEYS = { hue: 'themeHue', sat: 'themeSat', contrast: 'themeContrast' };
 const SYNC_ALL_KEYS = new Set([...Object.values(SYNC_JSON_SECTIONS), ...SYNC_COMPOSER_KEYS, ...Object.values(SYNC_THEME_KEYS)]);
 const rawStoreSet = store.set.bind(store);
@@ -2569,6 +2572,7 @@ async function rerunFromHistory(name) {
   if (c.rounds) $('rounds').value = String(c.rounds);
   $('auto').checked = !!c.auto;
   $('outputMode').value = c.outputMode === 'deep-plan' ? 'deep-plan' : 'prompt';
+  if ($('ambition')) $('ambition').value = ['full', 'focused'].includes(c.ambition) ? c.ambition : 'balanced';
   for (const [sel, key, val] of [['authorProvider', 'authorProvider', c.authorProvider], ['criticProvider', 'criticProvider', c.criticProvider]]) {
     if (val) { $(sel).value = val; store.set(key, val); }
   }
