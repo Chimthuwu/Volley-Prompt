@@ -6,6 +6,11 @@ const nodeCrypto = require('crypto');
 const runsStore = require('./lib/runs-store.js');
 const providerModule = require('./lib/providers.js');
 const pairing = require('./lib/pairing.js');
+const { createWindowGuard } = require('./lib/window-guard.js');
+
+// Must run before the first ipcMain.handle(): every request is checked to come from our page.
+const windowGuard = createWindowGuard(path.join(__dirname, 'renderer', 'index.html'));
+windowGuard.guardIpc(ipcMain);
 
 const API = 'https://openrouter.ai/api/v1';
 const keyFile = () => path.join(app.getPath('userData'), 'key.bin');
@@ -66,15 +71,16 @@ function createWindow() {
   });
   win.setMenuBarVisibility(false);
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  // Only ever hand https links to the OS; anything else (file:, custom protocols) is dropped.
-  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file:')) { e.preventDefault(); if (/^https:\/\//i.test(url)) shell.openExternal(url); } });
+  // The window never leaves the app's page; only https links are handed to the OS.
+  windowGuard.guardWindow(win, shell);
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => app.quit());
+// Closing the app also ends a running volley's AI program.
+app.on('before-quit', () => current?.ctl.abort());
 
 // ---- key storage (encrypted with the OS when possible) ----
 let lastKeyError = '';
@@ -502,6 +508,14 @@ ipcMain.handle('sync:push', async (_e, profile) => {
 ipcMain.handle('runs:update', (_e, name, patch) => runsStore.updateRun(runsDir(), name, patch));
 ipcMain.handle('runs:read', (_e, name) => runsStore.readRun(runsDir(), name));
 
+// A retry pause that Stop cuts short.
+const pause = (ms, signal) => new Promise((resolve) => {
+  if (signal.aborted) return resolve();
+  const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); };
+  const timer = setTimeout(done, ms);
+  signal.addEventListener('abort', done, { once: true });
+});
+
 const IDLE_MS = 30000; // no bytes for this long means the stream stalled
 // Vision requests legitimately take far longer than text before the first byte (multi-MB
 // base64 payloads get uploaded/processed provider-side), so image-bearing calls wait wider.
@@ -536,10 +550,10 @@ async function stream(key, model, system, messages, signal, onDelta, onUsage, on
       try { res = await req(); } catch (e) {
         if (stalled) throw stall();
         if (ctl.signal.aborted) throw e;
-        if (attempt < 2) { await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); continue; }
+        if (attempt < 2) { await pause(1500 * (attempt + 1), ctl.signal); continue; }
         throw new Error("Can't reach OpenRouter. Check your internet.");
       }
-      if ((res.status === 429 || res.status >= 500) && attempt < 2) { await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); continue; }
+      if ((res.status === 429 || res.status >= 500) && attempt < 2) { await pause(2000 * (attempt + 1), ctl.signal); continue; }
       break;
     }
     if (!res.ok) throw new Error(friendly(res.status, await res.text().catch(() => '')));
@@ -718,6 +732,7 @@ ipcMain.handle('utility:call', async (_e, cfg) => {
 // does the two things a renderer cannot: talk to the provider with the scaffold systems,
 // and write the confirmed manifest to the user-picked folder with path re-validation.
 const scaffold = require('./lib/scaffold.js');
+const scaffoldWriter = require('./lib/scaffold-writer.js');
 
 ipcMain.handle('scaffold:call', async (_e, cfg) => {
   if (!cfg || (cfg.role !== 'author' && cfg.role !== 'critic')) throw new Error('Invalid scaffold role.');
@@ -754,44 +769,26 @@ ipcMain.handle('scaffold:call', async (_e, cfg) => {
   return { text, elapsedMs: Date.now() - startedAt };
 });
 
+// Folders you chose in the folder dialog this session. The window can't name any other.
+const pickedScaffoldDirs = new Set();
+
 ipcMain.handle('scaffold:write', async (_e, cfg) => {
   if (!cfg || typeof cfg.dir !== 'string' || !cfg.dir.trim()) return { ok: false, message: 'No destination folder chosen.' };
-  // Re-validate through the shared core: the renderer passes the parsed manifest, but the
-  // writer trusts nothing it did not validate itself.
-  const parsed = scaffold.parseManifest(JSON.stringify(cfg.manifest || []));
-  if (!parsed.ok) return { ok: false, message: parsed.error };
-  const dir = path.resolve(cfg.dir.trim());
-  let existing = [];
-  try { existing = fs.readdirSync(dir); } catch { /* ENOENT is fine — we create it */ }
-  if (existing.length && !cfg.overwrite) {
-    return { ok: false, needsMergePrompt: true, message: 'That folder is not empty.' };
-  }
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    let written = 0;
-    for (const file of parsed.manifest) {
-      const target = path.join(dir, ...file.path.split('/'));
-      // Belt and braces: the resolved target must stay inside the chosen directory even
-      // for symlinks smuggled into a subpath that parseManifest's ".." check cannot see.
-      // Windows compares paths case-insensitively, so the containment check must too.
-      const resolved = path.resolve(target);
-      const inside = resolved === dir || resolved.toLowerCase().startsWith(dir.toLowerCase() + path.sep);
-      if (!inside) {
-        return { ok: false, message: `Refusing to write outside the folder: ${file.path}` };
-      }
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, file.content, 'utf8');
-      written++;
-    }
-    return { ok: true, written };
-  } catch (e) {
-    return { ok: false, message: e && e.message ? e.message : String(e) };
-  }
+  const dir = path.resolve(cfg.dir);
+  if (!pickedScaffoldDirs.has(dir)) return { ok: false, message: 'Choose the destination with the folder button first.' };
+  // Path checks, link checks and backups all live in the writer.
+  return scaffoldWriter.writeScaffold({
+    dir,
+    manifest: cfg.manifest,
+    overwrite: cfg.overwrite === true,
+    backupRoot: path.join(app.getPath('userData'), 'scaffold-backups'),
+  });
 });
 
 ipcMain.handle('scaffold:pickDir', async () => {
   const res = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
   if (res.canceled || !res.filePaths.length) return { ok: false };
+  pickedScaffoldDirs.add(path.resolve(res.filePaths[0]));
   return { ok: true, dir: res.filePaths[0] };
 });
 
@@ -800,11 +797,15 @@ ipcMain.handle('scaffold:pickDir', async () => {
 const zip = require('./lib/zip.js');
 ipcMain.handle('scaffold:exportZip', async (_e, cfg) => {
   try {
-    const bytes = zip.buildZip(cfg.manifest || []);
+    const parsed = scaffold.parseManifest(JSON.stringify(cfg.manifest || []));
+    if (!parsed.ok) return { ok: false, message: parsed.error };
+    const bytes = zip.buildZip(parsed.manifest);
     let dir = app.getPath('downloads');
     try { fs.mkdirSync(dir, { recursive: true }); } catch { dir = app.getPath('userData'); }
-    const target = path.join(dir, 'volleyprompt-scaffold.zip');
-    fs.writeFileSync(target, Buffer.from(bytes));
+    // Never replace a zip that is already there.
+    let target = path.join(dir, 'volleyprompt-scaffold.zip');
+    for (let n = 2; fs.existsSync(target); n++) target = path.join(dir, `volleyprompt-scaffold (${n}).zip`);
+    fs.writeFileSync(target, Buffer.from(bytes), { flag: 'wx' });
     shell.showItemInFolder(target);
     return { ok: true, path: target, message: `Zip saved: ${target}` };
   } catch (e) {
@@ -813,8 +814,23 @@ ipcMain.handle('scaffold:exportZip', async (_e, cfg) => {
 });
 
 ipcMain.handle('run:start', async (_e, cfg) => {
-  if (current) return;
   const send = (ev) => win && !win.isDestroyed() && win.webContents.send('run:event', ev);
+  if (current) {
+    // A second click while a volley is running is ignored. A Start that arrives while the
+    // last one is still stopping must say so, or the screen waits forever.
+    if (current.ctl.signal.aborted) send({ type: 'error', message: 'The last volley is still stopping. Press Start again in a moment.' });
+    return;
+  }
+  // Taken before the first await: a second Start can't slip in beside this one, and Stop
+  // works while the volley is still starting up.
+  const run = { ctl: new AbortController(), resolveNotes: null, models: { author: cfg.author, critic: cfg.critic }, swapRequested: false, callAbort: null };
+  current = run;
+  try { await runVolley(cfg, run, send); }
+  finally { if (current === run) current = null; }
+});
+
+async function runVolley(cfg, run, send) {
+  const { ctl } = run;
   // Each role maps to a provider; default to OpenRouter so existing setups keep working.
   const providersByRole = {
     author: cfg.authorProvider || 'openrouter',
@@ -831,11 +847,10 @@ ipcMain.handle('run:start', async (_e, cfg) => {
   const { idea } = cfg;
   // Mutable for the whole run: the renderer can swap either model mid-volley (run:models),
   // which applies to the next call — or, with retry, restarts the request in flight.
-  const runModels = { author: cfg.author, critic: cfg.critic };
+  const runModels = run.models;
   const rounds = Math.max(1, Math.min(8, cfg.rounds | 0 || 3));
 
-  // Validate attachments and check vision support *before* taking the run lock, so a
-  // rejected run doesn't leave the app stuck thinking a volley is in progress.
+  // Validate attachments and check vision support before any model is called.
   const { images, textFiles, folders, rejected } = prepareAttachments(cfg.attachments);
   if (rejected.length) send({ type: 'notice', message: 'Skipped: ' + rejected.join(', ') });
 
@@ -849,7 +864,7 @@ ipcMain.handle('run:start', async (_e, cfg) => {
     if (writerVision !== true) {
       return send({
         type: 'error',
-        message: `The Writer model (${runModels.author}) ${writerVision === null ? "has unknown image support" : "doesn't support image inputs"}. Pick a vision-capable Writer, or remove the image attachments.`,
+        message: `The Writer model (${runModels.author}) ${writerVision === null ? "has unknown image support" : "can't be sent pictures here"}. Pick a vision-capable Writer, or remove the image attachments.`,
       });
     }
     const criticVision = visionFor(providersByRole.critic, runModels.critic, raw);
@@ -874,8 +889,8 @@ ipcMain.handle('run:start', async (_e, cfg) => {
     }
   }
 
-  const ctl = new AbortController();
-  current = { ctl, resolveNotes: null, models: runModels, swapRequested: false, callAbort: null };
+  // Stopped while still starting up: nothing has been called or saved yet.
+  if (ctl.signal.aborted) return send({ type: 'done', models: { ...runModels }, final: '', file: '', historyName: '', stopped: true, snapshots: [], score: null, cost: 0, tokens: 0, metrics: [] });
   // Per-call fallback: when a model call fails (rate-limit, outage, …) and a fallback model
   // is configured in Settings, that one call is retried once on the fallback model.
   const fallbackModel = (cfg.fallback || '').trim();
@@ -961,8 +976,6 @@ ipcMain.handle('run:start', async (_e, cfg) => {
   // The Writer (which can see the attachments) describes them once, up front, when the
   // Reviewer is text-only — one extra call per run, cheaper than requiring a vision Reviewer.
   let imageDescription = '';
-  // Runs inside the try below: if this call fails, `current` must still be released, otherwise
-  // the app believes a volley is in progress forever and refuses to start another.
   const describeImages = async () => {
     imageDescription = await callModel('Writer', 0, IMAGE_DESCRIPTION_SYSTEM,
       [{ role: 'user', content: buildUserContent('Describe the attached images for a text-only reviewer. For each, state what it shows and which product feature or UX moment it demonstrates. Output ONLY the descriptions.', images, [], []) }],
@@ -1036,7 +1049,7 @@ ipcMain.handle('run:start', async (_e, cfg) => {
       let notes = '', selectedIssues = null;
       if (!cfg.auto) {
         send({ type: 'await-notes' });
-        const reply = await new Promise((res) => { current.resolveNotes = res; });
+        const reply = await new Promise((res) => { if (ctl.signal.aborted) res(null); else current.resolveNotes = res; });
         if (reply === null) break; // user chose "finish here"
         selectedIssues = typeof reply === 'object' && Array.isArray(reply.selectedIssues) ? reply.selectedIssues : null;
         notes = (typeof reply === 'string' ? reply : String(reply.notes || '')).trim();
@@ -1073,14 +1086,13 @@ ipcMain.handle('run:start', async (_e, cfg) => {
     }
     else send({ type: 'error', message: e.message || String(e), partial: draft, idea });
   } finally {
-    current = null;
     // No -final.md means runs:list will never surface this run, so its .title sidecar is dead weight.
     if (!finalSaved && !draftSaved) {
       try { fs.unlinkSync(path.join(runsDir(), `${stamp}.title`)); } catch {}
       try { fs.unlinkSync(path.join(runsDir(), `${stamp}.idea`)); } catch {}
     }
   }
-});
+}
 
 ipcMain.handle('run:notes', (_e, notes) => { current?.resolveNotes?.(notes); });
 // Swap the Writer and/or Reviewer for the rest of a live volley. `retry: true` also aborts the

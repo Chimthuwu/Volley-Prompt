@@ -1185,8 +1185,8 @@ function currentScaffoldCfg() {
   };
 }
 function ensureHandoffFiles(manifest, prompt, idea, cycles) {
-  const cfg = currentScaffoldCfg();
-  const keep = manifest.filter((f) => f.path !== 'PROMPT.md' && f.path !== 'todo.md');
+  // Any capitalisation: on Windows "TODO.md" and "todo.md" are the same file.
+  const keep = manifest.filter((f) => !['prompt.md', 'todo.md'].includes(f.path.toLowerCase()));
   keep.push({ path: 'PROMPT.md', content: prompt });
   keep.push({ path: 'todo.md', content: VPS().buildTodoMd({ idea, prompt, cycles, manifest }) });
   return keep;
@@ -1301,9 +1301,17 @@ $('scaffoldConfirm').onclick = async () => {
     let r = await pv.scaffoldWrite({ dir: scaffoldDir, manifest: scaffoldManifest });
     if (r && r.needsMergePrompt) {
       // Guardrail L91: never overwrite a non-empty directory without an explicit merge.
+      // The desktop writer names the files it would replace; the web build can't.
+      let effect = 'same-name files are overwritten, everything else is kept';
+      if (Array.isArray(r.replaces)) {
+        const shown = r.replaces.slice(0, 8).join(', ') + (r.replaces.length > 8 ? ` and ${r.replaces.length - 8} more` : '');
+        effect = r.replaces.length
+          ? `${r.replaces.length} file(s) will be replaced: ${shown}. Copies of the old versions are saved first; everything else is kept`
+          : 'no existing file will be replaced';
+      }
       const ok = await askConfirm({
         title: 'Folder is not empty',
-        message: `"${scaffoldDir}" already has files. Write the scaffold into it anyway (same-name files are overwritten, everything else is kept)?`,
+        message: `"${scaffoldDir}" already has files. Write the scaffold into it anyway (${effect})?`,
         okLabel: 'Merge into it',
       });
       if (!ok) { $('scaffoldConfirm').disabled = false; return; }
@@ -1313,7 +1321,8 @@ $('scaffoldConfirm').onclick = async () => {
       show('scaffoldModal', false);
       show('utilityOutput');
       $('utilityTitle').textContent = `Scaffold · done — ${r.written} files in ${scaffoldDir}`;
-      $('utilityText').textContent = 'Open the folder in your IDE and start at milestone 1 in todo.md.';
+      $('utilityText').textContent = 'Open the folder in your IDE and start at milestone 1 in todo.md.'
+        + (r.backupDir ? `\n\nReplaced files: ${r.replaced.join(', ')}\nThe old versions are saved in: ${r.backupDir}` : '');
       toast(`Scaffold written: ${r.written} files.`, 6000);
     } else {
       $('scaffoldConfirm').disabled = false;
@@ -2089,6 +2098,17 @@ if (editorWrapper) {
     const dropped = await collectDataTransferEntries(e.dataTransfer);
     if (dropped.files.length) addAttachmentFiles(dropped.files);
     for (const group of dropped.folderGroups) queueContextExplorer(group);
+  });
+}
+
+// A file dropped anywhere else would otherwise open in place of the app.
+for (const type of ['dragover', 'drop']) {
+  window.addEventListener(type, (e) => {
+    if (e.defaultPrevented || !e.dataTransfer) return; // a real drop zone took it
+    if (!Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    if (e.target && e.target.matches && e.target.matches('input[type="file"]')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'none';
   });
 }
 

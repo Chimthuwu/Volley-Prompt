@@ -139,6 +139,22 @@ test('a non-empty destination needs the explicit merge confirmation before overw
   assert.match(doc.getElementById('promptMessage').textContent, /already has files/);
 });
 
+test('the merge confirmation names the files that would be replaced', async () => {
+  const { w } = await boot({ writeResult: { ok: false, needsMergePrompt: true, message: 'That folder is not empty.', replaces: ['src/app.js', 'README.md'] } });
+  const doc = w.document;
+  doc.getElementById('final').value = PROMPT;
+  doc.getElementById('rounds').value = '1';
+  doc.getElementById('btnScaffold').click();
+  await new Promise((r) => setTimeout(r, 50));
+  doc.getElementById('scaffoldPick').click();
+  await new Promise((r) => setTimeout(r, 20));
+  doc.getElementById('scaffoldConfirm').click();
+  await new Promise((r) => setTimeout(r, 30));
+  const message = doc.getElementById('promptMessage').textContent;
+  assert.match(message, /2 file\(s\) will be replaced: src\/app\.js, README\.md/);
+  assert.match(message, /old versions are saved/);
+});
+
 test('no folder picker → confirm becomes the .zip download and exports the manifest', async () => {
   const { w, calls } = await boot({
     // Override the pick response: jsdom has no showDirectoryPicker, so the app should
