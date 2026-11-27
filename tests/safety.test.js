@@ -136,6 +136,55 @@ test('a CLI that cannot be sent pictures says so instead of dropping them', asyn
   assert.equal(fs.existsSync(program.started), false, 'nothing is launched');
 });
 
+// A stand-in that prints each [delayMs, stream, text] step, then exits.
+function timedProgram(dir, steps) {
+  const script = path.join(dir, 'timed.js');
+  fs.writeFileSync(script, `
+    process.stdin.on('data', () => {});
+    process.stdin.on('end', async () => {
+      for (const [wait, stream, text] of ${JSON.stringify(steps)}) {
+        await new Promise((r) => setTimeout(r, wait));
+        process[stream].write(text + '\\n');
+      }
+    });
+  `);
+  return { script };
+}
+const resultLine = JSON.stringify({ type: 'result', result: 'done' });
+
+test('a quiet CLI is given at least two minutes, whatever the app limit is', () => {
+  assert.ok(providers.getProvider('anthropic').minIdleMs >= 120000);
+  assert.ok(providers.getProvider('google').minIdleMs >= 120000);
+});
+
+test('a CLI that really has stalled is still ended', async (t) => {
+  const p = cli(timedProgram(tmp(t), [[5000, 'stdout', resultLine]]));
+  providers.init({ IDLE_MS: 0 });
+  p.minIdleMs = 1000;
+  await assert.rejects(p.chat({ messages: ask() }), /stopped responding \(no output for 1s\)/);
+});
+
+test('any output, errors included, restarts the quiet clock', async (t) => {
+  const steps = [[900, 'stderr', 'working'], [900, 'stderr', 'working'], [900, 'stdout', resultLine]];
+  const p = cli(timedProgram(tmp(t), steps));
+  providers.init({ IDLE_MS: 0 });
+  p.minIdleMs = 1600;
+  assert.deepEqual(await p.chat({ messages: ask() }), { text: 'done' });
+});
+
+test('Claude is asked for text as it is written', () => {
+  assert.ok(providers.getProvider('anthropic').printFlags.includes('--include-partial-messages'));
+});
+
+test('text sent in pieces reaches the screen once', async () => {
+  const p = new providers.CliProvider('partial', 'Fake Claude', { binaries: ['node'], models: [] });
+  p.script = path.join(__dirname, 'fixtures', 'cli-fake-partial.js');
+  let shown = '';
+  const reply = await p.chat({ messages: ask(), onDelta: (d) => { shown += d; } });
+  assert.equal(shown, 'Hello world');
+  assert.equal(reply.text, 'Hello world');
+});
+
 test('only the app page counts as the app', () => {
   const page = path.join(ROOT, 'renderer', 'index.html');
   const guard = createWindowGuard(page);
