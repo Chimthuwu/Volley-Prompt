@@ -91,5 +91,49 @@ providerModule.init(deps);
   assert.strictEqual(oaiDeltas, 'hello world', 'openai chat accumulates streamed deltas');
   assert.strictEqual(oaiRes.text, 'hello world', 'openai chat returns text');
 
+  // ---- OpenCode Go with a saved key, against a stand-in server. The key is made up. ----
+  const loadBefore = deps.loadProvCred;
+  deps.loadProvCred = (id) => (id === 'opencode-go' ? 'made-up-test-key' : loadBefore(id));
+  const fetchReal = global.fetch;
+  const seen = [];
+  let usageStatus = 200;
+  global.fetch = async (url, opts = {}) => {
+    seen.push({ url: String(url), opts });
+    if (String(url).endsWith('/v1/models')) {
+      return { ok: true, status: 200, json: async () => ({ data: ['glm-5.3-flash', 'text-embedding-3-small', 'jev-1.14', 'gpt-6-luna-decision', 'beam-free'].map((id) => ({ id })) }) };
+    }
+    if (String(url).endsWith('/v1/usage')) {
+      return { ok: usageStatus === 200, status: usageStatus, text: async () => JSON.stringify({ error: { message: 'stand-in says no' } }) };
+    }
+    const enc = new TextEncoder();
+    return { ok: true, status: 200, body: (async function* () { yield enc.encode('data: ' + JSON.stringify({ choices: [{ delta: { content: 'ok' } }] }) + '\n'); })() };
+  };
+  try {
+    assert.deepStrictEqual((await og.getModels()).map((m) => m.id), ['glm-5.3-flash', 'beam-free'], 'embedding and decision models are left out');
+    assert.ok(!seen.at(-1).opts.headers.Authorization, 'the public model list is asked for without the key');
+    await og.verify();
+    assert.strictEqual(seen.at(-1).url, 'https://opencode.ai/inference/go/v1/usage');
+    assert.strictEqual(seen.at(-1).opts.headers.Authorization, 'Bearer made-up-test-key');
+    usageStatus = 401;
+    await assert.rejects(og.verify(), /rejected the API key.*stand-in says no/, 'a bad key is reported');
+    usageStatus = 403;
+    await assert.rejects(og.verify(), /needs a Go subscription/, 'a key without Go is reported');
+
+    const ask = (system) => og.chat({ model: 'glm-5.3-flash', system, messages: [{ role: 'user', content: 'hi' }], onDelta: () => {} });
+    assert.strictEqual((await ask('writer')).text, 'ok');
+    const first = seen.at(-1).opts.headers;
+    assert.strictEqual(seen.at(-1).url, 'https://opencode.ai/inference/go/openai/v1/chat/completions');
+    assert.ok(first['user-agent'].startsWith('VolleyPrompt/'), 'names itself');
+    assert.ok(first['x-opencode-session'], 'sends a session id');
+    await ask('writer');
+    assert.strictEqual(seen.at(-1).opts.headers['x-opencode-session'], first['x-opencode-session'], 'same role keeps its session');
+    await ask('reviewer');
+    assert.notStrictEqual(seen.at(-1).opts.headers['x-opencode-session'], first['x-opencode-session'], 'another role gets its own');
+  } finally {
+    global.fetch = fetchReal;
+    deps.loadProvCred = loadBefore;
+  }
+  await assert.rejects(og.verify(), /No OpenCode Go API key saved/, 'testing with nothing saved says so');
+
   console.log('providers.js unit test: PASSED');
 })().catch((e) => { console.error('providers.js unit test FAILED:', e); process.exit(1); });

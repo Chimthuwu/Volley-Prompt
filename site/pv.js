@@ -816,8 +816,10 @@ const DEEP_PLAN_WRITER_APPEND = `\n\nOUTPUT MODE — DEEP CODE PLAN: the attache
     providerCredsHas: async () => ({ present: !!loadKey(), masked: '' }),
     providerCredsSave: async () => ({ present: !!loadKey(), masked: '' }),
     providerModels: async () => [],
-    providerConnect: async (_id, value) => {
-      const check = typeof value === 'string' && value.trim() ? value.trim() : loadKey();
+    // The web version can't save a key from this card, so it only tests the saved one:
+    // "connected" must never mean a key that is about to be forgotten.
+    providerConnect: async () => {
+      const check = loadKey();
       if (!check) return { ok: false, models: [], message: 'No key saved. Paste it and save first.' };
       try {
         const r = await fetch(`${API}/auth/key`, { headers: { Authorization: `Bearer ${check}` } });
